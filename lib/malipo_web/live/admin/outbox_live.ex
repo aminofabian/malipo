@@ -21,7 +21,7 @@ defmodule MalipoWeb.Admin.OutboxLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:outbox}>
+    <Layouts.admin flash={@flash} current={:outbox} admin={@current_admin}>
       <div class="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">Outbox</h1>
@@ -51,7 +51,11 @@ defmodule MalipoWeb.Admin.OutboxLive do
             <tr :for={r <- @rows} class="hover:bg-base-200/40">
               <td>
                 <span class={status_class(r.status)}>{r.status}</span>
-                <span :if={r.last_error} class="mt-0.5 block max-w-[14rem] truncate text-xs text-error/80" title={r.last_error}>
+                <span
+                  :if={r.last_error}
+                  class="mt-0.5 block max-w-[14rem] truncate text-xs text-error/80"
+                  title={r.last_error}
+                >
                   {r.last_error}
                 </span>
               </td>

@@ -46,6 +46,41 @@ config :malipo, :monolith_payment_events_url, System.get_env("MONOLITH_PAYMENT_E
 # Shared secret for /internal/* (Bearer). Unset = open (dev/test); required in prod edge.
 config :malipo, :service_token, System.get_env("MALIPO_SERVICE_TOKEN")
 
+# Super-admin console credentials (/admin/*). Unset in prod = console cannot be
+# signed into (fail closed). Dev falls back to admin/admin for convenience.
+if config_env() != :test do
+  admin_user = System.get_env("MALIPO_ADMIN_USER")
+  admin_password = System.get_env("MALIPO_ADMIN_PASSWORD")
+
+  {admin_user, admin_password} =
+    if config_env() == :dev and (is_nil(admin_user) or admin_user == "") do
+      {"admin", "admin"}
+    else
+      {admin_user, admin_password}
+    end
+
+  config :malipo, :admin_auth, user: admin_user, password: admin_password
+
+  cond do
+    config_env() == :dev and admin_user == "admin" and admin_password == "admin" ->
+      IO.puts(
+        :stderr,
+        "[malipo] /admin is using the default credentials admin/admin — " <>
+          "set MALIPO_ADMIN_USER and MALIPO_ADMIN_PASSWORD to change them."
+      )
+
+    is_nil(admin_user) or admin_user == "" or is_nil(admin_password) or admin_password == "" ->
+      IO.puts(
+        :stderr,
+        "[malipo] /admin has no credentials configured (MALIPO_ADMIN_USER / " <>
+          "MALIPO_ADMIN_PASSWORD) — the super-admin console is disabled."
+      )
+
+    true ->
+      :ok
+  end
+end
+
 # CLOAK_KEY is required in prod (see Malipo.Vault). Optional elsewhere when
 # :dev_fallback_key is configured.
 

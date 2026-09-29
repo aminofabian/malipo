@@ -102,7 +102,7 @@ defmodule MalipoWeb.Admin.FeesLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:fees}>
+    <Layouts.admin flash={@flash} current={:fees} admin={@current_admin}>
       <div class="mx-auto max-w-3xl space-y-10">
         <header class="space-y-2">
           <h1 class="text-2xl font-semibold tracking-tight">Fees</h1>

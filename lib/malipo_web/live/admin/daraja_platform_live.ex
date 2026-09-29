@@ -110,7 +110,7 @@ defmodule MalipoWeb.Admin.DarajaPlatformLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:daraja}>
+    <Layouts.admin flash={@flash} current={:daraja} admin={@current_admin}>
       <div class="mx-auto max-w-2xl space-y-8">
         <header class="space-y-2">
           <h1 class="text-2xl font-semibold tracking-tight">Platform Daraja</h1>
@@ -221,9 +221,7 @@ defmodule MalipoWeb.Admin.DarajaPlatformLive do
             field={@form[:consumer_secret]}
             type="password"
             label={"Consumer secret" <> secret_hint(@view.has_consumer_secret)}
-            placeholder={
-              if @view.has_consumer_secret, do: "•••••••• (leave blank to keep)", else: ""
-            }
+            placeholder={if @view.has_consumer_secret, do: "•••••••• (leave blank to keep)", else: ""}
             autocomplete="new-password"
           />
 

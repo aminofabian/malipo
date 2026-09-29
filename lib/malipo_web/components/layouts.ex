@@ -73,34 +73,62 @@ defmodule MalipoWeb.Layouts do
   end
 
   attr :flash, :map, required: true
-  attr :current, :atom, default: :intents, doc: ":intents | :till | :outbox | :merchants | :daraja | :fees"
+
+  attr :current, :atom,
+    default: :dashboard,
+    doc:
+      ":dashboard | :transactions | :intents | :till | :accounts | :outbox | :merchants | :team | :daraja | :fees"
+
+  attr :admin, :string, default: nil, doc: "the signed-in operator, shown in the header"
   slot :inner_block, required: true
 
   def admin(assigns) do
     ~H"""
     <div class="min-h-dvh bg-base-100 text-base-content">
       <header class="border-b border-base-300">
-        <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+        <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div class="flex items-baseline gap-3">
-            <a href={~p"/admin/intents"} class="text-lg font-semibold tracking-tight">
+            <a href={~p"/admin"} class="text-lg font-semibold tracking-tight">
               Malipo
             </a>
             <span class="text-xs text-base-content/50">super admin</span>
           </div>
-          <.theme_toggle />
+          <div class="flex items-center gap-3">
+            <span :if={@admin} class="hidden text-xs text-base-content/50 sm:inline">
+              {gettext("Signed in as")} <span class="font-medium text-base-content">{@admin}</span>
+            </span>
+            <.theme_toggle />
+            <form action={~p"/admin/logout"} method="post" class="inline">
+              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+              <input type="hidden" name="_method" value="delete" />
+              <button type="submit" class="btn btn-ghost btn-sm">{gettext("Sign out")}</button>
+            </form>
+          </div>
         </div>
-        <nav class="mx-auto flex max-w-5xl gap-1 overflow-x-auto px-4 pb-3 sm:px-6">
+        <nav class="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 pb-3 sm:px-6">
+          <.admin_nav_link href={~p"/admin"} current={@current == :dashboard}>
+            Overview
+          </.admin_nav_link>
+          <.admin_nav_link href={~p"/admin/transactions"} current={@current == :transactions}>
+            Transactions
+          </.admin_nav_link>
           <.admin_nav_link href={~p"/admin/intents"} current={@current == :intents}>
             Intents
           </.admin_nav_link>
           <.admin_nav_link href={~p"/admin/till"} current={@current == :till}>
             Till
           </.admin_nav_link>
+          <.admin_nav_link href={~p"/admin/accounts"} current={@current == :accounts}>
+            Accounts
+          </.admin_nav_link>
           <.admin_nav_link href={~p"/admin/outbox"} current={@current == :outbox}>
             Outbox
           </.admin_nav_link>
           <.admin_nav_link href={~p"/admin/merchants"} current={@current == :merchants}>
             Merchants
+          </.admin_nav_link>
+          <.admin_nav_link href={~p"/admin/team"} current={@current == :team}>
+            Team
           </.admin_nav_link>
           <.admin_nav_link href={~p"/admin/fees"} current={@current == :fees}>
             Fees
@@ -111,7 +139,7 @@ defmodule MalipoWeb.Layouts do
         </nav>
       </header>
 
-      <main class="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {render_slot(@inner_block)}
       </main>
 

@@ -21,7 +21,7 @@ defmodule MalipoWeb.Admin.IntentsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:intents}>
+    <Layouts.admin flash={@flash} current={:intents} admin={@current_admin}>
       <div class="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">Intents</h1>
@@ -44,6 +44,7 @@ defmodule MalipoWeb.Admin.IntentsLive do
               <th>Business</th>
               <th>Receipt / checkout</th>
               <th>When</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -59,11 +60,19 @@ defmodule MalipoWeb.Admin.IntentsLive do
               </td>
               <td class="font-mono text-xs">{mask(i.payer_msisdn)}</td>
               <td class="font-mono text-xs">{i.business_id}</td>
-              <td class="max-w-[12rem] truncate font-mono text-xs" title={i.receipt || i.checkout_request_id}>
+              <td
+                class="max-w-[12rem] truncate font-mono text-xs"
+                title={i.receipt || i.checkout_request_id}
+              >
                 {i.receipt || i.checkout_request_id || "—"}
               </td>
               <td class="whitespace-nowrap text-xs text-base-content/50">
                 {fmt(i.inserted_at)}
+              </td>
+              <td class="text-right">
+                <.link navigate={~p"/admin/intents/#{i.id}"} class="link link-hover text-xs">
+                  View
+                </.link>
               </td>
             </tr>
           </tbody>

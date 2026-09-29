@@ -17,7 +17,6 @@ defmodule MalipoWeb.Router do
     plug :put_root_layout, html: {MalipoWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-    plug MalipoWeb.Plugs.AdminBasicAuth
   end
 
   pipeline :api do
@@ -54,13 +53,29 @@ defmodule MalipoWeb.Router do
   scope "/admin", MalipoWeb do
     pipe_through :admin
 
-    live "/", Admin.IntentsLive, :index
-    live "/intents", Admin.IntentsLive, :index
-    live "/till", Admin.TillLive, :index
-    live "/outbox", Admin.OutboxLive, :index
-    live "/merchants", Admin.MerchantsLive, :index
-    live "/fees", Admin.FeesLive, :index
-    live "/daraja/platform", Admin.DarajaPlatformLive, :index
+    # Sign-in is a plain HTTP round trip so the session cookie can be written.
+    live_session :admin_guest,
+      on_mount: {MalipoWeb.AdminAuth, :redirect_if_authenticated} do
+      live "/login", Admin.LoginLive, :new
+    end
+
+    post "/login", AdminSessionController, :create
+    delete "/logout", AdminSessionController, :delete
+
+    # Everything below requires a signed-in operator.
+    live_session :admin, on_mount: {MalipoWeb.AdminAuth, :require_admin} do
+      live "/", Admin.DashboardLive, :index
+      live "/transactions", Admin.TransactionsLive, :index
+      live "/intents", Admin.IntentsLive, :index
+      live "/intents/:id", Admin.IntentLive, :show
+      live "/till", Admin.TillLive, :index
+      live "/accounts", Admin.AccountsLive, :index
+      live "/outbox", Admin.OutboxLive, :index
+      live "/merchants", Admin.MerchantsLive, :index
+      live "/team", Admin.TeamLive, :index
+      live "/fees", Admin.FeesLive, :index
+      live "/daraja/platform", Admin.DarajaPlatformLive, :index
+    end
   end
 
   # Safaricom-facing callbacks — no CSRF, always 200 after persist.

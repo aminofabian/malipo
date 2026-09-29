@@ -43,3 +43,6 @@ config :malipo, Malipo.Vault,
 
 # Fast password hashes in test.
 config :malipo, :connect_password_iterations, 1_000
+
+# Deterministic super-admin credentials for tests (runtime.exs skips :test).
+config :malipo, :admin_auth, user: "admin", password: "admin"

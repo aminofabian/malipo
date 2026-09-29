@@ -4,6 +4,8 @@ defmodule MalipoWeb.Admin.DarajaPlatformLiveTest do
   alias Malipo.Vault.Configs
 
   test "renders write-only form without secret values", %{conn: conn} do
+    conn = log_in_admin(conn)
+
     assert {:ok, _} =
              Configs.update(%{
                "consumer_key" => "super-secret-key",
@@ -23,18 +25,20 @@ defmodule MalipoWeb.Admin.DarajaPlatformLiveTest do
     refute html =~ "super-secret-secret"
     refute html =~ "super-secret-pass"
 
-    assert render_submit(form(view, "#platform-daraja-form",
-             settings: %{
-               shortcode: "1234567",
-               consumer_key: "brand-new-key",
-               consumer_secret: "brand-new-secret",
-               passkey: "brand-new-pass",
-               environment: "sandbox",
-               shortcode_type: "paybill",
-               callback_base: "https://example.com",
-               enabled: "true"
-             }
-           )) =~ "Platform Daraja settings saved"
+    assert render_submit(
+             form(view, "#platform-daraja-form",
+               settings: %{
+                 shortcode: "1234567",
+                 consumer_key: "brand-new-key",
+                 consumer_secret: "brand-new-secret",
+                 passkey: "brand-new-pass",
+                 environment: "sandbox",
+                 shortcode_type: "paybill",
+                 callback_base: "https://example.com",
+                 enabled: "true"
+               }
+             )
+           ) =~ "Platform Daraja settings saved"
 
     creds = Configs.credentials()
     assert creds["consumer_key"] == "brand-new-key"

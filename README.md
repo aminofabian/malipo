@@ -57,5 +57,11 @@ Scaffolded + Oban + intents + Daraja adapter + platform vault + webhooks +
 outbox + internal intent API + health probes + **C2B till receipts**
 (`till_receipts`, match-by-BillRef / unmatched → `till_receipt.unmatched`).
 
+**Super-admin console** at `/admin/*` (LiveView, session login): overview
+dashboard, unified transactions, an intent inspector, Connect accounts, till
+receipts, outbox, merchants, a team screen for DB-backed console operators, and
+platform Daraja credentials. See
+[`../console/README.md`](../console/README.md).
+
 Elixir-only. Next: Broadway ingest under load, or rail-health read API.
 # malipo

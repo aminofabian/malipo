@@ -34,7 +34,7 @@ defmodule MalipoWeb.Admin.MerchantsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:merchants}>
+    <Layouts.admin flash={@flash} current={:merchants} admin={@current_admin}>
       <div class="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">Merchants</h1>
@@ -89,6 +89,7 @@ defmodule MalipoWeb.Admin.MerchantsLive do
   end
 
   defp dest_summary(%{kind: "till", till_number: n}), do: "Till #{n}"
+
   defp dest_summary(%{kind: "paybill", paybill_number: p, account_number: a}),
     do: "Paybill #{p} · #{a}"
 

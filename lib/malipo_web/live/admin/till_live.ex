@@ -37,7 +37,7 @@ defmodule MalipoWeb.Admin.TillLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.admin flash={@flash} current={:till}>
+    <Layouts.admin flash={@flash} current={:till} admin={@current_admin}>
       <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 class="text-2xl font-semibold tracking-tight">Till receipts</h1>

@@ -36,4 +36,16 @@ defmodule MalipoWeb.ConnCase do
     Malipo.DataCase.setup_sandbox(tags)
     {:ok, conn: Phoenix.ConnTest.build_conn()}
   end
+
+  @doc """
+  Put an authenticated super-admin session on a test connection.
+
+  Mirrors what `MalipoWeb.AdminSessionController.create/2` writes, so LiveView
+  tests can reach `/admin/*` routes behind the `:require_admin` hook.
+  """
+  def log_in_admin(conn, user \\ "admin") do
+    conn
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session("admin_user", user)
+  end
 end
