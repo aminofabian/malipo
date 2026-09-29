@@ -1,0 +1,13 @@
+_build
+deps
+.doc
+.git
+.gitignore
+.tmp
+.elixir_ls
+cover
+test
+tmp
+*.md
+.env
+.env.*
