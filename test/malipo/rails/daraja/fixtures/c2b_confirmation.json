@@ -1,0 +1,15 @@
+{
+  "TransactionType": "Pay Bill",
+  "TransID": "SJH4K2LM9P",
+  "TransTime": "20260921114205",
+  "TransAmount": "100.00",
+  "BusinessShortCode": "4094529",
+  "BillRefNumber": "sale_wh_c2b",
+  "InvoiceNumber": "",
+  "OrgAccountBalance": "50000.00",
+  "ThirdPartyTransID": "",
+  "MSISDN": "254712345678",
+  "FirstName": "JOHN",
+  "MiddleName": "",
+  "LastName": "KAMAU"
+}

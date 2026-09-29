@@ -1,0 +1,11 @@
+{
+  "ResponseCode": "0",
+  "ResponseDescription": "The service request has been accepted successfully",
+  "MerchantRequestID": "29115-34620561-1",
+  "CheckoutRequestID": "ws_CO_190920261234_ABC",
+  "ResultCode": "0",
+  "ResultDesc": "The service request is processed successfully.",
+  "MpesaReceiptNumber": "SJH4K2LM9P",
+  "Amount": "1450.00",
+  "PhoneNumber": "254712345678"
+}

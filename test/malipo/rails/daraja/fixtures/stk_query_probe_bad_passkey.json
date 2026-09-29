@@ -1,0 +1,5 @@
+{
+  "requestId": "1173-probe-bad",
+  "errorCode": "500.001.1001",
+  "errorMessage": "Wrong credentials"
+}

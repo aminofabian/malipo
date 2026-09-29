@@ -1,0 +1,5 @@
+{
+  "requestId": "1173-probe",
+  "errorCode": "500.001.1001",
+  "errorMessage": "The transaction does not exist"
+}
