@@ -12,7 +12,8 @@ defmodule Malipo.Intents do
   alias Malipo.Intents.{Attempt, Intent}
   alias Malipo.Msisdn
   alias Malipo.Outbox
-  alias Malipo.Merchants.SettlementRail
+  alias Malipo.Merchants
+  alias Malipo.Merchants.{Destination, SettlementRail}
   alias Malipo.Rails.Daraja
   alias Malipo.Rails.Daraja.Platform
   alias Malipo.Rails.Failure
@@ -47,6 +48,8 @@ defmodule Malipo.Intents do
           | {:error, Ecto.Changeset.t() | :invalid_phone}
   def create(attrs) when is_map(attrs) do
     with {:ok, params} <- build_create_params(attrs) do
+      params = attribute_destination(params)
+
       case Repo.insert(Intent.create_changeset(params)) do
         {:ok, intent} ->
           {:ok, intent}
@@ -492,6 +495,27 @@ defmodule Malipo.Intents do
 
   defp transaction_desc(%Intent{context: %{"type" => type}}) when is_binary(type), do: type
   defp transaction_desc(_), do: "Payment"
+
+  # Snapshot the destination that will receive this intent, so per-destination
+  # totals can be computed later even after the merchant switches defaults.
+  defp attribute_destination(%{context: ctx, business_id: business_id} = params)
+       when is_binary(business_id) do
+    ctx = ctx || %{}
+
+    if ctx["settlement_destination_id"] do
+      params
+    else
+      case Merchants.get_active_destination(business_id) do
+        %Destination{id: id} when is_binary(id) ->
+          %{params | context: Map.put(ctx, "settlement_destination_id", id)}
+
+        _ ->
+          params
+      end
+    end
+  end
+
+  defp attribute_destination(params), do: params
 
   defp build_create_params(attrs) do
     attrs = stringify_keys(attrs)

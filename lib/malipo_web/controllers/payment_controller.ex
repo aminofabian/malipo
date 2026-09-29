@@ -6,6 +6,7 @@ defmodule MalipoWeb.PaymentController do
   alias Malipo.Intents
   alias Malipo.Intents.Intent
   alias Malipo.Merchants
+  alias Malipo.Merchants.ApiKey
   alias Malipo.Rails.Failure
 
   action_fallback MalipoWeb.FallbackController
@@ -14,12 +15,13 @@ defmodule MalipoWeb.PaymentController do
   POST /v1/payments
 
   Optional `callback_url` is where we POST `payment.settled` / `payment.failed`.
-  Omit it and poll `GET /v1/payments/:id` instead. No account webhook to register.
+  When it is omitted, the website URL saved on the merchant's key (Connect →
+  Settings) is used. Omit both and poll `GET /v1/payments/:id` instead.
   """
   def create(conn, params) do
     business_id = conn.assigns.business_id
 
-    with {:ok, callback} <- take_callback(params["callback_url"]) do
+    with {:ok, callback} <- resolve_callback(business_id, params["callback_url"]) do
       if Merchants.collections_allowed?(business_id) do
         attrs = public_to_intent(params, business_id, callback)
 
@@ -91,6 +93,17 @@ defmodule MalipoWeb.PaymentController do
       "context" => context
     }
   end
+
+  # A per-request callback_url wins; otherwise fall back to the merchant's saved
+  # website URL (set in Connect → Settings). Not sending either means "poll".
+  defp resolve_callback(business_id, nil) do
+    case Merchants.get_active_key(business_id) do
+      %ApiKey{webhook_url: url} when is_binary(url) -> {:ok, url}
+      _ -> {:ok, nil}
+    end
+  end
+
+  defp resolve_callback(_business_id, url), do: take_callback(url)
 
   defp take_callback(nil), do: {:ok, nil}
 

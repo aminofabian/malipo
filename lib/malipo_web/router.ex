@@ -102,6 +102,7 @@ defmodule MalipoWeb.Router do
     post "/connect/login", ConnectAuthController, :login
 
     get "/merchants/:business_id", MerchantController, :show
+    get "/merchants/:business_id/summary", MerchantController, :summary
     get "/merchants/:business_id/payments", MerchantController, :payments
     get "/merchants/:business_id/destinations", MerchantController, :list_destinations
     post "/merchants/:business_id/destinations", MerchantController, :create_destination

@@ -51,6 +51,25 @@ lib/malipo/
 └── vault.ex        Cloak vault
 ```
 
+## Operations
+
+Intents created before per-destination attribution existed have no destination id.
+Attribute them once after deploy (idempotent — safe to re-run):
+
+```bash
+mix malipo.backfill_attribution
+```
+
+In a release (no Mix), use `eval`:
+
+```bash
+bin/malipo eval "Malipo.Admin.backfill_destination_attribution()"
+```
+
+The same action is available as **Backfill attribution** on the super-admin
+Merchants page (`/admin/merchants`). New intents are attributed automatically at
+creation.
+
 ## Status
 
 Scaffolded + Oban + intents + Daraja adapter + platform vault + webhooks +

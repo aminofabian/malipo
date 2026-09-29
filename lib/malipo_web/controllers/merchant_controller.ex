@@ -3,8 +3,12 @@ defmodule MalipoWeb.MerchantController do
 
   use MalipoWeb, :controller
 
+  import Ecto.Query
+
+  alias Malipo.Intents.Intent
   alias Malipo.Merchants
   alias Malipo.Merchants.Destination
+  alias Malipo.Repo
 
   action_fallback MalipoWeb.FallbackController
 
@@ -161,6 +165,35 @@ defmodule MalipoWeb.MerchantController do
     })
   end
 
+  @doc "GET /internal/v1/merchants/:business_id/summary — settled totals by destination."
+  def summary(conn, %{"business_id" => business_id}) do
+    grouped =
+      from(i in Intent,
+        where: i.business_id == ^business_id and i.status == "settled",
+        group_by: fragment("?->>'settlement_destination_id'", i.context),
+        select:
+          {fragment("?->>'settlement_destination_id'", i.context), count(i.id), sum(i.amount)}
+      )
+      |> Repo.all()
+
+    totals =
+      from(i in Intent,
+        where: i.business_id == ^business_id and i.status == "settled",
+        select: %{count: count(i.id), total: sum(i.amount)}
+      )
+      |> Repo.one()
+
+    json(conn, %{
+      business_id: business_id,
+      received_count: totals.count,
+      received_total: decimal_str(totals.total),
+      by_destination:
+        Enum.map(grouped, fn {destination_id, count, total} ->
+          %{destination_id: destination_id, count: count, total: decimal_str(total)}
+        end)
+    })
+  end
+
   @doc "GET /internal/v1/merchants/:business_id/payments — last few intents."
   def payments(conn, %{"business_id" => business_id} = params) do
     limit =
@@ -177,6 +210,9 @@ defmodule MalipoWeb.MerchantController do
     json(conn, %{business_id: business_id, payments: rows})
   end
 
+  defp decimal_str(nil), do: "0"
+  defp decimal_str(%Decimal{} = d), do: Decimal.to_string(d)
+
   defp payment_summary(%Malipo.Intents.Intent{} = i) do
     %{
       id: i.id,
@@ -184,6 +220,7 @@ defmodule MalipoWeb.MerchantController do
       amount: Decimal.to_string(i.amount),
       currency: i.currency,
       reference: get_in(i.context || %{}, ["reference"]),
+      destination_id: get_in(i.context || %{}, ["settlement_destination_id"]),
       failure_kind: i.failure_kind,
       inserted_at: i.inserted_at && DateTime.to_iso8601(i.inserted_at)
     }

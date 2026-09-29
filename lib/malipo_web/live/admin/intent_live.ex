@@ -54,6 +54,8 @@ defmodule MalipoWeb.Admin.IntentLive do
       <section class="mb-8">
         <dl class="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <.field label="Business" value={@detail.intent.business_id} mono />
+          <.field label="Attribution" value={attribution(@detail)} />
+          <.field label="Destination id" value={destination_id(@detail.intent) || "—"} mono />
           <.field label="Rail" value={@detail.intent.rail} />
           <.field label="Payer MSISDN" value={mask(@detail.intent.payer_msisdn)} mono />
           <.field label="Idempotency key" value={@detail.intent.idempotency_key} mono />
@@ -198,6 +200,23 @@ defmodule MalipoWeb.Admin.IntentLive do
       <dd class={["mt-0.5", @mono && "font-mono text-xs"]}>{@value}</dd>
     </div>
     """
+  end
+
+  defp attribution(detail) do
+    id = destination_id(detail.intent)
+
+    cond do
+      detail.destination -> Admin.destination_label(detail.destination)
+      is_binary(id) -> "Attributed to a destination that no longer exists"
+      true -> "Not attributed"
+    end
+  end
+
+  defp destination_id(intent) do
+    case intent.context do
+      %{"settlement_destination_id" => id} when is_binary(id) -> id
+      _ -> nil
+    end
   end
 
   defp mask(msisdn) when is_binary(msisdn) and byte_size(msisdn) >= 7 do

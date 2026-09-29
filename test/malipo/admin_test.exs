@@ -4,6 +4,7 @@ defmodule Malipo.AdminTest do
   alias Malipo.Admin
   alias Malipo.ConnectAccounts
   alias Malipo.Intents
+  alias Malipo.Intents.Intent
   alias Malipo.Merchants
   alias Malipo.Till
 
@@ -83,6 +84,31 @@ defmodule Malipo.AdminTest do
     assert Enum.all?(c2b, &(&1.kind == "c2b"))
   end
 
+  test "backfill_destination_attribution stamps intents missing a destination" do
+    {:ok, destination} =
+      Merchants.put_destination("biz_backfill", %{"kind" => "till", "till_number" => "1111111"})
+
+    {:ok, _} = Merchants.confirm_destination("biz_backfill")
+
+    settle("biz_backfill", "backfill-key-1", "100.00", "BFRCPT1")
+
+    # Simulate legacy data: strip the attribution we just set.
+    Repo.update_all(
+      from(i in Intent, where: i.business_id == "biz_backfill"),
+      set: [context: %{}]
+    )
+
+    assert Repo.one(from(i in Intent, where: i.business_id == "biz_backfill")).context == %{}
+
+    assert %{intents: 1, businesses: 1} = Admin.backfill_destination_attribution()
+
+    reloaded = Repo.one(from(i in Intent, where: i.business_id == "biz_backfill"))
+    assert reloaded.context["settlement_destination_id"] == destination.id
+
+    # Idempotent: nothing left to attribute.
+    assert %{intents: 0, businesses: 0} = Admin.backfill_destination_attribution()
+  end
+
   test "intent_detail returns attempts, events and the matched receipt" do
     intent = settle("biz_detail", "admin-detail-1", "500.00", "DETAILRCPT")
 
@@ -92,7 +118,22 @@ defmodule Malipo.AdminTest do
     assert attempt.attempt_number == 1
     assert Enum.any?(detail.events, &(&1.event == "intent.settled"))
     assert detail.receipt == nil
+    assert detail.destination == nil
+    assert Admin.destination_label(nil) == "—"
 
     assert {:error, :not_found} = Admin.intent_detail(Ecto.UUID.generate())
+  end
+
+  test "intent_detail resolves the attributed destination" do
+    {:ok, destination} =
+      Merchants.put_destination("biz_attributed", %{"kind" => "till", "till_number" => "5550000"})
+
+    {:ok, _} = Merchants.confirm_destination("biz_attributed")
+
+    intent = settle("biz_attributed", "attr-detail-key", "10.00", "ATTRDETAIL")
+
+    assert {:ok, detail} = Admin.intent_detail(intent.id)
+    assert detail.destination.id == destination.id
+    assert Admin.destination_label(detail.destination) == "Till 5550000"
   end
 end

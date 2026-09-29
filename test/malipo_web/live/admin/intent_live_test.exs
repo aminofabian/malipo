@@ -22,6 +22,8 @@ defmodule MalipoWeb.Admin.IntentLiveTest do
     assert html =~ "DETAILRCPT1"
     assert html =~ "ws_detail_1"
     assert html =~ "biz_detail"
+    assert html =~ "Attribution"
+    assert html =~ "Not attributed"
     assert html =~ "Attempts"
     assert html =~ "intent.settled"
   end

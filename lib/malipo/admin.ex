@@ -1,10 +1,11 @@
 defmodule Malipo.Admin do
   @moduledoc """
-  Read-only aggregates that power the super-admin console.
+  Aggregates that power the super-admin console, plus a one-off data backfill.
 
   Everything here is a projection over data Malipo already owns — Connect
   accounts, merchant destinations/keys, STK intents, C2B till receipts, and the
-  settlement outbox. No writes, no money movement.
+  settlement outbox. `backfill_destination_attribution/0` is the only write, and
+  it only touches intents that are missing a destination id.
   """
 
   import Ecto.Query
@@ -169,8 +170,128 @@ defmodule Malipo.Admin do
           )
           |> Repo.one()
 
-        {:ok, %{intent: intent, attempts: attempts, events: events, receipt: receipt}}
+        {:ok,
+         %{
+           intent: intent,
+           attempts: attempts,
+           events: events,
+           receipt: receipt,
+           destination: attributed_destination(intent)
+         }}
     end
+  end
+
+  @doc "Human label for a settlement destination (till / paybill / bank)."
+  @spec destination_label(Destination.t() | nil) :: String.t()
+  def destination_label(%Destination{kind: "till", till_number: n}) when is_binary(n),
+    do: "Till #{n}"
+
+  def destination_label(%Destination{
+        kind: kind,
+        paybill_number: paybill,
+        account_number: account
+      })
+      when kind in ["paybill", "bank"] and is_binary(paybill) and is_binary(account) do
+    prefix = if kind == "bank", do: "Bank", else: "Paybill"
+    "#{prefix} #{paybill} · #{account}"
+  end
+
+  def destination_label(%Destination{display_name: name}) when is_binary(name), do: name
+  def destination_label(%Destination{kind: kind}), do: kind
+  def destination_label(nil), do: "—"
+
+  defp attributed_destination(%Intent{context: context}) do
+    case context && context["settlement_destination_id"] do
+      id when is_binary(id) -> Repo.get(Destination, id)
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Best-effort backfill of `context.settlement_destination_id` on intents created
+  before attribution existed.
+
+  Each intent is attributed to the destination that was most likely active when
+  it was created: the newest destination whose `inserted_at` is at or before the
+  intent's, falling back to the earliest destination for older rows.
+
+  Returns `%{intents: n, businesses: m}`.
+  """
+  @spec backfill_destination_attribution() :: %{
+          intents: non_neg_integer(),
+          businesses: non_neg_integer()
+        }
+  def backfill_destination_attribution do
+    business_ids =
+      from(i in Intent,
+        where: is_nil(fragment("?->>'settlement_destination_id'", i.context)),
+        distinct: true,
+        select: i.business_id
+      )
+      |> Repo.all()
+
+    Enum.reduce(business_ids, %{intents: 0, businesses: 0}, fn business_id, acc ->
+      case backfill_business(business_id) do
+        0 -> acc
+        n -> %{acc | intents: acc.intents + n, businesses: acc.businesses + 1}
+      end
+    end)
+  end
+
+  defp backfill_business(business_id) do
+    destinations =
+      from(d in Destination,
+        where: d.business_id == ^business_id,
+        order_by: [asc: d.inserted_at]
+      )
+      |> Repo.all()
+
+    case destinations do
+      [] -> 0
+      destinations -> attribute_windows(business_id, destinations)
+    end
+  end
+
+  defp attribute_windows(business_id, destinations) do
+    last = length(destinations) - 1
+
+    destinations
+    |> Enum.with_index()
+    |> Enum.reduce(0, fn {destination, index}, acc ->
+      lower = if index == 0, do: nil, else: Enum.at(destinations, index - 1).inserted_at
+      upper = if index == last, do: nil, else: Enum.at(destinations, index + 1).inserted_at
+
+      acc + attribute_window(business_id, destination.id, lower, upper)
+    end)
+  end
+
+  defp attribute_window(business_id, destination_id, lower, upper) do
+    business_id
+    |> unattributed_query()
+    |> filter_window(lower, upper)
+    |> Repo.all()
+    |> Enum.reduce(0, fn intent, acc ->
+      context = Map.put(intent.context || %{}, "settlement_destination_id", destination_id)
+      Repo.update!(Ecto.Changeset.change(intent, context: context))
+      acc + 1
+    end)
+  end
+
+  defp filter_window(query, lower, upper) do
+    cond do
+      lower && upper -> where(query, [i], i.inserted_at >= ^lower and i.inserted_at < ^upper)
+      lower -> where(query, [i], i.inserted_at >= ^lower)
+      upper -> where(query, [i], i.inserted_at < ^upper)
+      true -> query
+    end
+  end
+
+  defp unattributed_query(business_id) do
+    from(i in Intent,
+      where:
+        i.business_id == ^business_id and
+          is_nil(fragment("?->>'settlement_destination_id'", i.context))
+    )
   end
 
   @doc false

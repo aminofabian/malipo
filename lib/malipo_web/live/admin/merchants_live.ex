@@ -1,8 +1,9 @@
 defmodule MalipoWeb.Admin.MerchantsLive do
-  @moduledoc "Super-admin merchant destinations — read only."
+  @moduledoc "Super-admin merchant destinations — read mostly, plus a data backfill action."
 
   use MalipoWeb, :live_view
 
+  alias Malipo.Admin
   alias Malipo.Merchants
 
   @impl true
@@ -16,6 +17,18 @@ defmodule MalipoWeb.Admin.MerchantsLive do
   @impl true
   def handle_event("refresh", _params, socket) do
     {:noreply, assign(socket, :rows, load())}
+  end
+
+  def handle_event("backfill_attribution", _params, socket) do
+    %{intents: intents, businesses: businesses} = Admin.backfill_destination_attribution()
+
+    {:noreply,
+     socket
+     |> put_flash(
+       :info,
+       "Attributed #{intents} intent(s) across #{businesses} business(es)"
+     )
+     |> assign(:rows, load())}
   end
 
   defp load do
@@ -42,7 +55,18 @@ defmodule MalipoWeb.Admin.MerchantsLive do
             Connect destinations and keys — secrets never shown here.
           </p>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" phx-click="refresh">Refresh</button>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="backfill_attribution"
+            phx-disable-with="Backfilling…"
+            data-confirm="Stamp missing destination attribution on historical intents?"
+          >
+            Backfill attribution
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="refresh">Refresh</button>
+        </div>
       </div>
 
       <div :if={@rows == []} class="py-16 text-center text-sm text-base-content/50">

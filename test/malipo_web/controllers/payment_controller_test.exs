@@ -116,6 +116,22 @@ defmodule MalipoWeb.PaymentControllerTest do
     assert body["error"] == "invalid_callback_url"
   end
 
+  test "POST /v1/payments falls back to the saved website URL", %{conn: conn, keys: keys} do
+    {:ok, _} = Merchants.set_webhook_url("biz_pay", "https://shop.example/hooks/malipo")
+
+    body =
+      conn
+      |> basic(keys)
+      |> post(~p"/v1/payments", %{
+        "amount" => "1.00",
+        "customer_phone" => "0712345678",
+        "idempotency_key" => "merchant-test-default-cb"
+      })
+      |> json_response(201)
+
+    assert body["callback_url"] == "https://shop.example/hooks/malipo"
+  end
+
   test "POST /v1/payments accepts the secret as a bearer token", %{conn: conn, keys: keys} do
     body =
       conn
