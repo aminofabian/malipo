@@ -58,6 +58,7 @@ ENV MIX_ENV=prod
 ENV PHX_SERVER=true
 
 COPY --from=builder --chown=nobody:root /app/_build/prod/rel/malipo ./
+RUN chmod +x /app/bin/server /app/bin/migrate /app/bin/malipo
 
 USER nobody
 
