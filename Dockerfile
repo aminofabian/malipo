@@ -30,8 +30,9 @@ COPY lib lib
 COPY assets assets
 
 RUN mix assets.setup
-RUN mix assets.deploy
+# Colocated CSS/JS is emitted during compile; assets.deploy must run after.
 RUN mix compile
+RUN mix assets.deploy
 
 COPY config/runtime.exs config/
 COPY rel rel

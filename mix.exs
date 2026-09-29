@@ -103,6 +103,7 @@ defmodule Malipo.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind malipo", "esbuild malipo"],
       "assets.deploy": [
+        "compile",
         "tailwind malipo --minify",
         "esbuild malipo --minify",
         "phx.digest"
