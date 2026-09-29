@@ -24,6 +24,20 @@ defmodule MalipoWeb.IntentJSON do
     %{error: "invalid_callback_url", message: "callback_url must be an https URL"}
   end
 
+  def error(%{error: :destination_inactive}) do
+    %{
+      error: "destination_inactive",
+      message: "Confirm a till, paybill, or bank in Connect before collecting"
+    }
+  end
+
+  def error(%{error: :destination_invalid}) do
+    %{
+      error: "destination_invalid",
+      message: "Settlement destination is incomplete or invalid"
+    }
+  end
+
   def error(%{error: :invalid_credentials}) do
     %{error: "invalid_credentials", message: "Email or password is incorrect"}
   end

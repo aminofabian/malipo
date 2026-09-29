@@ -12,6 +12,7 @@ defmodule Malipo.Intents do
   alias Malipo.Intents.{Attempt, Intent}
   alias Malipo.Msisdn
   alias Malipo.Outbox
+  alias Malipo.Merchants.SettlementRail
   alias Malipo.Rails.Daraja
   alias Malipo.Rails.Daraja.Platform
   alias Malipo.Rails.Failure
@@ -354,6 +355,24 @@ defmodule Malipo.Intents do
       callback_url: callback
     }
 
+    case merchant_stk_request(intent, request) do
+      {:error, reason} ->
+        if fail? do
+          _ =
+            mark_failed(intent, %{
+              failure_kind: Atom.to_string(reason),
+              failure_message: failure_message_for(reason)
+            })
+        end
+
+        {:error, reason}
+
+      {:ok, request} ->
+        do_daraja_push(intent, creds, request, fail?)
+    end
+  end
+
+  defp do_daraja_push(intent, creds, request, fail?) do
     case Daraja.push(creds, request) do
       {:ok, result} ->
         mark_prompted(intent, %{
@@ -376,6 +395,30 @@ defmodule Malipo.Intents do
         {:error, failure}
     end
   end
+
+  defp merchant_stk_request(%Intent{} = intent, request) do
+    case SettlementRail.overrides_for_push(intent.context, intent.business_id) do
+      {:ok, overrides} ->
+        {:ok, Map.merge(request, overrides)}
+
+      :skip ->
+        {:ok, request}
+
+      {:error, :destination_inactive} ->
+        {:error, :destination_inactive}
+
+      {:error, :invalid_destination} ->
+        {:error, :destination_invalid}
+    end
+  end
+
+  defp failure_message_for(:destination_inactive),
+    do: "Confirm an activated settlement destination before collecting"
+
+  defp failure_message_for(:destination_invalid),
+    do: "Settlement destination is incomplete or invalid"
+
+  defp failure_message_for(reason) when is_atom(reason), do: Atom.to_string(reason)
 
   defp maybe_merge_on_settled(attrs) do
     attrs = stringify_keys(attrs)
@@ -468,6 +511,8 @@ defmodule Malipo.Intents do
           other -> other
         end
 
+      context = merge_settlement_into_context(attrs)
+
       {:ok,
        %{
          business_id: attrs["business_id"],
@@ -476,9 +521,38 @@ defmodule Malipo.Intents do
          amount: amount,
          currency: attrs["currency"] || "KES",
          payer_msisdn: msisdn,
-         context: attrs["context"] || %{},
+         context: context,
          expires_at: expires_at
        }}
+    end
+  end
+
+  defp merge_settlement_into_context(attrs) do
+    ctx =
+      case attrs["context"] do
+        %{} = c -> c
+        _ -> %{}
+      end
+
+    dest =
+      attrs["settlement_destination"] ||
+        attrs["destination"] ||
+        ctx["settlement_destination"] ||
+        ctx["destination"]
+
+    party_b = attrs["party_b"] || attrs["partyB"] || ctx["party_b"] || ctx["partyB"]
+
+    ctx =
+      if is_map(dest) do
+        Map.put(ctx, "settlement_destination", dest)
+      else
+        ctx
+      end
+
+    if is_binary(party_b) and party_b != "" do
+      Map.put(ctx, "party_b", party_b)
+    else
+      ctx
     end
   end
 

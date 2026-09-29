@@ -40,6 +40,20 @@ defmodule MalipoWeb.FallbackController do
     |> render(:error, error: :invalid_callback_url)
   end
 
+  def call(conn, {:error, :destination_inactive}) do
+    conn
+    |> put_status(:conflict)
+    |> put_view(json: MalipoWeb.IntentJSON)
+    |> render(:error, error: :destination_inactive)
+  end
+
+  def call(conn, {:error, :destination_invalid}) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> put_view(json: MalipoWeb.IntentJSON)
+    |> render(:error, error: :destination_invalid)
+  end
+
   def call(conn, {:error, :invalid_credentials}) do
     conn
     |> put_status(:unauthorized)

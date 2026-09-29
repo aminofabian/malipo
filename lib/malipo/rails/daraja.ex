@@ -247,7 +247,20 @@ defmodule Malipo.Rails.Daraja do
          {:ok, callback} <- callback_url(request) do
       timestamp = Password.timestamp(DateTime.utc_now())
       password = Password.build(creds.shortcode, creds.passkey, timestamp)
-      account_ref = account_reference(request["account_reference"] || creds.account_reference)
+      party_b = party_b_for_push(creds, request)
+      effective_creds = %{creds | party_b: party_b}
+
+      tx_type =
+        case first_text(request, ["transaction_type", "transactionType"]) do
+          nil -> Credentials.transaction_type(effective_creds)
+          type -> type
+        end
+
+      account_ref =
+        account_reference(
+          request["account_reference"] || creds.account_reference
+        )
+
       desc = truncate(request["transaction_desc"] || request["description"] || "Payment", 13)
 
       {:ok,
@@ -255,10 +268,10 @@ defmodule Malipo.Rails.Daraja do
          "BusinessShortCode" => creds.shortcode,
          "Password" => password,
          "Timestamp" => timestamp,
-         "TransactionType" => Credentials.transaction_type(creds),
+         "TransactionType" => tx_type,
          "Amount" => amount,
          "PartyA" => phone,
-         "PartyB" => creds.party_b,
+         "PartyB" => party_b,
          "PhoneNumber" => phone,
          "CallBackURL" => callback,
          "AccountReference" => account_ref,
@@ -425,6 +438,13 @@ defmodule Malipo.Rails.Daraja do
 
       _ ->
         {:error, Failure.new(:unknown, "callback_url is required", retryable?: false)}
+    end
+  end
+
+  defp party_b_for_push(creds, request) do
+    case first_text(request, ["party_b", "partyB", "PartyB"]) do
+      nil -> creds.party_b
+      code -> code
     end
   end
 

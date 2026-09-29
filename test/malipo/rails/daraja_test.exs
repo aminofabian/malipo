@@ -109,6 +109,32 @@ defmodule Malipo.Rails.DarajaTest do
     assert result.merchant_request_id == "29115-34620561-1"
   end
 
+  test "push/2 honours request party_b for custody collection", %{bypass: bypass, creds: creds} do
+    stub_oauth(bypass)
+
+    Bypass.expect(bypass, "POST", "/mpesa/stkpush/v1/processrequest", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+      assert payload["PartyB"] == "5738421"
+      assert payload["TransactionType"] == "CustomerBuyGoodsOnline"
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, fixture("stk_push_accepted.json"))
+    end)
+
+    assert {:ok, _} =
+             Daraja.push(creds, %{
+               amount: 10,
+               phone: "254712345678",
+               account_reference: "Order1",
+               transaction_desc: "Sale",
+               callback_url: "https://kiosk.ke",
+               party_b: "5738421",
+               transaction_type: "CustomerBuyGoodsOnline"
+             })
+  end
+
   test "push/2 classifies Wrong credentials", %{bypass: bypass, creds: creds} do
     stub_oauth(bypass)
 
