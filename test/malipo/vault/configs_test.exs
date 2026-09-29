@@ -118,4 +118,25 @@ defmodule Malipo.Vault.ConfigsTest do
     assert creds["consumer_key"] == "env-key"
     assert creds["shortcode"] == "222222"
   end
+
+  test "Platform.credentials merges DB secrets with env shortcode" do
+    Application.put_env(:malipo, :daraja,
+      shortcode: "333333",
+      environment: "sandbox"
+    )
+
+    assert {:ok, _} =
+             Configs.update(%{
+               "consumer_key" => "db-key",
+               "consumer_secret" => "db-secret",
+               "passkey" => "db-pass"
+             })
+
+    creds = Platform.credentials()
+    assert creds["consumer_key"] == "db-key"
+    assert creds["consumer_secret"] == "db-secret"
+    assert creds["passkey"] == "db-pass"
+    assert creds["shortcode"] == "333333"
+    assert Platform.missing_fields() == []
+  end
 end

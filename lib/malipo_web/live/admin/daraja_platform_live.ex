@@ -54,10 +54,15 @@ defmodule MalipoWeb.Admin.DarajaPlatformLive do
 
     case Platform.credentials() do
       nil ->
+        missing = Platform.missing_fields() |> Enum.join(", ")
+
         {:noreply,
          socket
          |> assign(:testing?, false)
-         |> put_flash(:error, "Save consumer key, secret, shortcode, and passkey first")}
+         |> put_flash(
+           :error,
+           "Still missing: #{missing}. Fill Business shortcode and Save (secrets can stay blank if already set)."
+         )}
 
       creds ->
         {status, message} =
@@ -129,6 +134,16 @@ defmodule MalipoWeb.Admin.DarajaPlatformLive do
             <div>
               <dt class="text-base-content/50">Passkey</dt>
               <dd>{set_label(@view.has_passkey)}</dd>
+            </div>
+            <div>
+              <dt class="text-base-content/50">Shortcode</dt>
+              <dd>
+                <%= if @view.shortcode in [nil, ""] do %>
+                  <span class="text-error font-medium">Not set — required</span>
+                <% else %>
+                  {@view.shortcode}
+                <% end %>
+              </dd>
             </div>
             <div>
               <dt class="text-base-content/50">Last test</dt>

@@ -11,8 +11,10 @@ defmodule MalipoWeb.Endpoint do
     same_site: "Lax"
   ]
 
+  # Longpoll only — Cloudflare Flexible SSL stalls Phoenix WebSockets after the
+  # 101 upgrade (admin UI stuck on "Attempting to reconnect"). Longpoll works.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
+    websocket: false,
     longpoll: [connect_info: [session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
