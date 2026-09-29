@@ -2,118 +2,184 @@ defmodule Malipo.Merchants do
   @moduledoc """
   Merchant settlement destinations and API keys for Malipo Connect.
 
-  Secrets are write-only: plaintext is returned once from `provision_keys/1`
-  and only the SHA-256 hash is stored.
+  A business may save many destinations; exactly one may be `active` for collections.
   """
 
   import Ecto.Query
 
+  alias Ecto.Multi
   alias Malipo.Merchants.{ApiKey, Destination}
   alias Malipo.Repo
 
-  @doc "Fetch destination for a business."
+  @doc "The destination currently used for STK / collections."
   @spec get_destination(String.t()) :: Destination.t() | nil
   def get_destination(business_id) when is_binary(business_id) do
-    Repo.get_by(Destination, business_id: business_id)
+    get_active_destination(business_id)
   end
 
-  @doc "Upsert a draft destination (not activated until confirm)."
-  @spec put_destination(String.t(), map()) ::
+  @doc "Fetch one saved destination owned by the business."
+  @spec get_destination(String.t(), Ecto.UUID.t()) :: Destination.t() | nil
+  def get_destination(business_id, id) when is_binary(business_id) do
+    Repo.get_by(Destination, id: id, business_id: business_id)
+  end
+
+  @spec get_active_destination(String.t()) :: Destination.t() | nil
+  def get_active_destination(business_id) when is_binary(business_id) do
+    Repo.get_by(Destination, business_id: business_id, active: true)
+  end
+
+  @doc "All saved destinations for a business, newest first."
+  @spec list_for_business(String.t()) :: [Destination.t()]
+  def list_for_business(business_id) when is_binary(business_id) do
+    from(d in Destination,
+      where: d.business_id == ^business_id,
+      order_by: [desc: d.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc "Save a new destination (does not replace existing rows)."
+  @spec create_destination(String.t(), map()) ::
           {:ok, Destination.t()} | {:error, Ecto.Changeset.t()}
-  def put_destination(business_id, attrs) when is_binary(business_id) and is_map(attrs) do
+  def create_destination(business_id, attrs) when is_binary(business_id) and is_map(attrs) do
     attrs =
       attrs
       |> stringify()
       |> Map.put("business_id", business_id)
       |> Map.put("verified", false)
       |> Map.put("activated", false)
+      |> Map.put("active", false)
       |> maybe_display_name()
 
-    case get_destination(business_id) do
-      nil ->
-        %Destination{} |> Destination.changeset(attrs) |> Repo.insert()
-
-      %Destination{} = row ->
-        row |> Destination.changeset(attrs) |> Repo.update()
-    end
+    %Destination{}
+    |> Destination.changeset(attrs)
+    |> Repo.insert()
   end
 
-  @doc "Mark destination verified + activated after merchant confirms."
-  @spec confirm_destination(String.t()) ::
+  @doc "Backward-compatible alias — always inserts a new row."
+  @spec put_destination(String.t(), map()) ::
+          {:ok, Destination.t()} | {:error, Ecto.Changeset.t()}
+  def put_destination(business_id, attrs), do: create_destination(business_id, attrs)
+
+  @doc """
+  Confirm a destination. When `destination_id` is omitted, confirms the newest unverified row.
+  Newly confirmed destinations become active (and the previous active row is deactivated).
+  """
+  @spec confirm_destination(String.t(), Ecto.UUID.t() | nil) ::
           {:ok, Destination.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def confirm_destination(business_id) when is_binary(business_id) do
-    case get_destination(business_id) do
+  def confirm_destination(business_id, destination_id \\ nil)
+
+  def confirm_destination(business_id, destination_id) when is_binary(business_id) do
+    case resolve_confirm_row(business_id, destination_id) do
       nil ->
         {:error, :not_found}
 
       %Destination{} = row ->
-        row
-        |> Destination.changeset(%{verified: true, activated: true})
-        |> Repo.update()
+        with {:ok, verified} <-
+               row |> Destination.changeset(%{verified: true}) |> Repo.update(),
+             {:ok, active} <- activate_destination(business_id, verified.id) do
+          {:ok, active}
+        end
     end
   end
 
-  @doc "True when collections may run for this business."
+  @doc "Mark a verified destination as the one in use for collections."
+  @spec activate_destination(String.t(), Ecto.UUID.t()) ::
+          {:ok, Destination.t()} | {:error, :not_found | :not_verified | Ecto.Changeset.t()}
+  def activate_destination(business_id, destination_id)
+      when is_binary(business_id) and is_binary(destination_id) do
+    case get_destination(business_id, destination_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Destination{verified: false} ->
+        {:error, :not_verified}
+
+      %Destination{} = target ->
+        now_active =
+          from(d in Destination, where: d.business_id == ^business_id and d.active == true)
+
+        Multi.new()
+        |> Multi.update_all(:clear, now_active, set: [active: false, activated: false])
+        |> Multi.update(:set, Destination.changeset(target, %{active: true, activated: true}))
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{set: dest}} -> {:ok, dest}
+          {:error, _step, reason, _} -> {:error, reason}
+        end
+    end
+  end
+
+  @doc "True when an active destination is verified."
   @spec collections_allowed?(String.t()) :: boolean()
   def collections_allowed?(business_id) when is_binary(business_id) do
-    case get_destination(business_id) do
-      %Destination{activated: true, verified: true} -> true
+    case get_active_destination(business_id) do
+      %Destination{verified: true} -> true
       _ -> false
     end
   end
 
+  @doc "True when the business has at least one verified destination (for key provisioning)."
+  @spec any_verified_destination?(String.t()) :: boolean()
+  def any_verified_destination?(business_id) when is_binary(business_id) do
+    from(d in Destination,
+      where: d.business_id == ^business_id and d.verified == true,
+      limit: 1
+    )
+    |> Repo.exists?()
+  end
+
   @doc """
   Issue (or rotate) API keys. Returns plaintext secrets **once**.
-
-  Revokes any previous active key for the business.
   """
   @spec provision_keys(String.t()) ::
           {:ok, map()} | {:error, :destination_not_ready | Ecto.Changeset.t()}
   def provision_keys(business_id) when is_binary(business_id) do
-    case get_destination(business_id) do
-      %Destination{verified: true} ->
-        client_secret = token("sk_live_")
-        webhook_secret = token("whsec_")
-        secret_attrs = %{
-          client_secret_hash: hash(client_secret),
-          webhook_secret_hash: hash(webhook_secret),
-          webhook_secret: webhook_secret
-        }
+    if any_verified_destination?(business_id) do
+      issue_keys(business_id)
+    else
+      {:error, :destination_not_ready}
+    end
+  end
 
-        result =
-          case get_active_key(business_id) do
-            %ApiKey{} = key ->
-              key
-              |> ApiKey.changeset(secret_attrs)
-              |> Repo.update()
+  defp issue_keys(business_id) do
+    client_secret = token("sk_live_")
+    webhook_secret = token("whsec_")
 
-            nil ->
-              %ApiKey{}
-              |> ApiKey.changeset(
-                Map.merge(secret_attrs, %{
-                  business_id: business_id,
-                  client_id: stable_client_id(business_id)
-                })
-              )
-              |> Repo.insert()
-          end
+    secret_attrs = %{
+      client_secret_hash: hash(client_secret),
+      webhook_secret_hash: hash(webhook_secret),
+      webhook_secret: webhook_secret
+    }
 
-        case result do
-          {:ok, key} ->
-            {:ok,
-             %{
-               client_id: key.client_id,
-               client_secret: client_secret,
-               webhook_secret: webhook_secret,
-               business_id: business_id
-             }}
+    result =
+      case get_active_key(business_id) do
+        %ApiKey{} = key ->
+          key |> ApiKey.changeset(secret_attrs) |> Repo.update()
 
-          {:error, reason} ->
-            {:error, reason}
-        end
+        nil ->
+          %ApiKey{}
+          |> ApiKey.changeset(
+            Map.merge(secret_attrs, %{
+              business_id: business_id,
+              client_id: stable_client_id(business_id)
+            })
+          )
+          |> Repo.insert()
+      end
 
-      _ ->
-        {:error, :destination_not_ready}
+    case result do
+      {:ok, key} ->
+        {:ok,
+         %{
+           client_id: key.client_id,
+           client_secret: client_secret,
+           webhook_secret: webhook_secret,
+           business_id: business_id
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -128,7 +194,6 @@ defmodule Malipo.Merchants do
     end
   end
 
-  @doc "Authenticate `Authorization: Bearer sk_live_…`. The secret alone identifies the merchant."
   @spec authenticate_secret(String.t()) :: {:ok, String.t()} | {:error, :unauthorized}
   def authenticate_secret(secret) when is_binary(secret) do
     secret = String.trim(secret)
@@ -151,7 +216,6 @@ defmodule Malipo.Merchants do
     end
   end
 
-  @doc "Active (non-revoked) key for a business, if any."
   @spec get_active_key(String.t()) :: ApiKey.t() | nil
   def get_active_key(business_id) when is_binary(business_id) do
     from(k in ApiKey,
@@ -165,44 +229,29 @@ defmodule Malipo.Merchants do
   @doc "Recent destinations newest-first (ops console)."
   @spec list_destinations(non_neg_integer()) :: [Destination.t()]
   def list_destinations(limit \\ 50) do
-    from(d in Destination,
-      order_by: [desc: d.updated_at],
-      limit: ^limit
-    )
+    from(d in Destination, order_by: [desc: d.updated_at], limit: ^limit)
     |> Repo.all()
   end
 
-  @doc "Set or replace the merchant webhook URL on the active key."
   @spec set_webhook_url(String.t(), String.t() | nil) ::
           {:ok, ApiKey.t()} | {:error, :no_active_key | :invalid_url | Ecto.Changeset.t()}
   def set_webhook_url(business_id, url) when is_binary(business_id) do
     url = url && String.trim(url)
 
     cond do
-      is_nil(url) or url == "" ->
-        do_set_webhook(business_id, nil)
-
-      not valid_callback_url?(url) ->
-        {:error, :invalid_url}
-
-      true ->
-        do_set_webhook(business_id, url)
+      is_nil(url) or url == "" -> do_set_webhook(business_id, nil)
+      not valid_callback_url?(url) -> {:error, :invalid_url}
+      true -> do_set_webhook(business_id, url)
     end
   end
 
   defp do_set_webhook(business_id, url) do
     case get_active_key(business_id) do
-      nil ->
-        {:error, :no_active_key}
-
-      %ApiKey{} = key ->
-        key |> ApiKey.changeset(%{webhook_url: url}) |> Repo.update()
+      nil -> {:error, :no_active_key}
+      %ApiKey{} = key -> key |> ApiKey.changeset(%{webhook_url: url}) |> Repo.update()
     end
   end
 
-  @doc """
-  Callback target: `https` with a host, or `http` on localhost / 127.0.0.1.
-  """
   @spec valid_callback_url?(String.t()) :: boolean()
   def valid_callback_url?(url) when is_binary(url) do
     case URI.parse(url) do
@@ -212,6 +261,21 @@ defmodule Malipo.Merchants do
       _ -> false
     end
   end
+
+  defp resolve_confirm_row(business_id, nil) do
+    from(d in Destination,
+      where: d.business_id == ^business_id and d.verified == false,
+      order_by: [desc: d.inserted_at],
+      limit: 1
+    )
+    |> Repo.one()
+    |> case do
+      nil -> get_active_destination(business_id)
+      row -> row
+    end
+  end
+
+  defp resolve_confirm_row(business_id, id), do: get_destination(business_id, id)
 
   defp stable_client_id(business_id) do
     case get_active_key(business_id) || latest_key(business_id) do
@@ -235,12 +299,12 @@ defmodule Malipo.Merchants do
 
   defp maybe_display_name(%{"kind" => "till", "till_number" => till} = attrs)
        when is_binary(till) do
-    Map.put(attrs, "display_name", "BUSINESS " <> String.slice(till, -3, 3))
+    Map.put(attrs, "display_name", "Till " <> till)
   end
 
   defp maybe_display_name(%{"kind" => "paybill", "paybill_number" => pb} = attrs)
        when is_binary(pb) do
-    Map.put(attrs, "display_name", "BUSINESS " <> String.slice(pb, -3, 3))
+    Map.put(attrs, "display_name", "Paybill " <> pb)
   end
 
   defp maybe_display_name(%{"kind" => "bank", "paybill_number" => pb, "account_number" => acc} = attrs)
@@ -254,9 +318,7 @@ defmodule Malipo.Merchants do
     prefix <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
   end
 
-  defp hash(secret) when is_binary(secret) do
-    :crypto.hash(:sha256, secret)
-  end
+  defp hash(secret) when is_binary(secret), do: :crypto.hash(:sha256, secret)
 
   defp secure_hash_eq(stored, secret) when is_binary(stored) and is_binary(secret) do
     Plug.Crypto.secure_compare(stored, hash(secret))

@@ -6,7 +6,7 @@ defmodule MalipoWeb.MerchantControllerTest do
       "kind" => "till",
       "till_number" => "1234567"
     })
-    |> json_response(200)
+    |> json_response(201)
 
     post(conn, ~p"/internal/v1/merchants/biz_api_m/confirm", %{})
     |> json_response(200)

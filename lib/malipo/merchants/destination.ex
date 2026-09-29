@@ -23,6 +23,7 @@ defmodule Malipo.Merchants.Destination do
     field :display_name, :string
     field :verified, :boolean, default: false
     field :activated, :boolean, default: false
+    field :active, :boolean, default: false
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -40,12 +41,16 @@ defmodule Malipo.Merchants.Destination do
       :bank_id,
       :display_name,
       :verified,
-      :activated
+      :activated,
+      :active
     ])
     |> validate_required([:business_id, :kind])
     |> validate_inclusion(:kind, @kinds)
     |> validate_kind_fields()
-    |> unique_constraint(:business_id)
+    |> unique_constraint(:business_id,
+      name: :settlement_destinations_one_active_per_business,
+      message: "another destination is already in use"
+    )
   end
 
   defp validate_kind_fields(cs) do

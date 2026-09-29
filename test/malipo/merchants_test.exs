@@ -20,7 +20,19 @@ defmodule Malipo.MerchantsTest do
     assert {:ok, confirmed} = Merchants.confirm_destination("biz_m1")
     assert confirmed.verified
     assert confirmed.activated
+    assert confirmed.active
     assert Merchants.collections_allowed?("biz_m1")
+
+    assert {:ok, second} =
+             Merchants.create_destination("biz_m1", %{
+               "kind" => "till",
+               "till_number" => "600100"
+             })
+
+    refute second.active
+    assert {:ok, _} = Merchants.confirm_destination("biz_m1", second.id)
+    assert Merchants.get_active_destination("biz_m1").till_number == "600100"
+    assert length(Merchants.list_for_business("biz_m1")) == 2
 
     assert {:ok, revealed} = Merchants.provision_keys("biz_m1")
     assert String.starts_with?(revealed.client_id, "pk_live_")

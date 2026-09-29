@@ -5,7 +5,13 @@ defmodule Malipo.Merchants.SettlementRailTest do
   alias Malipo.Merchants.SettlementRail
 
   test "till destination maps to buy goods PartyB" do
-    dest = %Destination{kind: "till", till_number: "5738421", verified: true, activated: true}
+    dest = %Destination{
+      kind: "till",
+      till_number: "5738421",
+      verified: true,
+      activated: true,
+      active: true
+    }
 
     assert {:ok, %{party_b: "5738421", transaction_type: "CustomerBuyGoodsOnline"}} =
              SettlementRail.stk_push_overrides(dest)
@@ -17,7 +23,8 @@ defmodule Malipo.Merchants.SettlementRailTest do
       paybill_number: "400200",
       account_number: "ACC001",
       verified: true,
-      activated: true
+      activated: true,
+      active: true
     }
 
     assert {:ok, overrides} = SettlementRail.stk_push_overrides(dest)

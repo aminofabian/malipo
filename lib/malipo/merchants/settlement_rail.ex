@@ -128,22 +128,26 @@ defmodule Malipo.Merchants.SettlementRail do
   end
 
   defp overrides_from_business_id(business_id) do
-    case Merchants.get_destination(business_id) do
-      nil ->
-        :skip
-
+    case Merchants.get_active_destination(business_id) do
       %Destination{} = dest ->
         case stk_push_overrides(dest) do
           {:ok, _} = ok -> ok
           {:error, :destination_inactive} -> {:error, :destination_inactive}
           {:error, :invalid_destination} -> {:error, :invalid_destination}
         end
+
+      nil ->
+        if Merchants.list_for_business(business_id) == [] do
+          :skip
+        else
+          {:error, :destination_inactive}
+        end
     end
   end
 
-  defp destination_usable?(%Destination{verified: true, activated: true}), do: true
+  defp destination_usable?(%Destination{verified: true, active: true}), do: true
 
-  defp destination_usable?(%Destination{verified: true, activated: false}), do: true
+  defp destination_usable?(%Destination{verified: true, active: false}), do: false
 
   defp destination_usable?(_), do: false
 

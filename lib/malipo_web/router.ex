@@ -88,6 +88,21 @@ defmodule MalipoWeb.Router do
 
     get "/merchants/:business_id", MerchantController, :show
     get "/merchants/:business_id/payments", MerchantController, :payments
+    get "/merchants/:business_id/destinations", MerchantController, :list_destinations
+    post "/merchants/:business_id/destinations", MerchantController, :create_destination
+
+    get "/merchants/:business_id/destinations/:destination_id",
+        MerchantController,
+        :show_destination
+
+    post "/merchants/:business_id/destinations/:destination_id/confirm",
+         MerchantController,
+         :confirm_destination
+
+    post "/merchants/:business_id/destinations/:destination_id/activate",
+         MerchantController,
+         :activate_destination
+
     put "/merchants/:business_id/destination", MerchantController, :put_destination
     post "/merchants/:business_id/confirm", MerchantController, :confirm
     post "/merchants/:business_id/keys", MerchantController, :provision_keys

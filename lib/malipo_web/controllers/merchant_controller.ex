@@ -8,22 +8,84 @@ defmodule MalipoWeb.MerchantController do
 
   action_fallback MalipoWeb.FallbackController
 
-  @doc "PUT /internal/v1/merchants/:business_id/destination"
+  @doc "PUT /internal/v1/merchants/:business_id/destination — saves a new row."
   def put_destination(conn, %{"business_id" => business_id} = params) do
     attrs = Map.drop(params, ["business_id"])
 
-    case Merchants.put_destination(business_id, attrs) do
+    case Merchants.create_destination(business_id, attrs) do
       {:ok, %Destination{} = dest} ->
-        json(conn, destination_json(dest))
+        conn |> put_status(:created) |> json(destination_json(dest))
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
+  @doc "POST /internal/v1/merchants/:business_id/destinations"
+  def create_destination(conn, params) do
+    put_destination(conn, params)
+  end
+
+  @doc "GET /internal/v1/merchants/:business_id/destinations"
+  def list_destinations(conn, %{"business_id" => business_id}) do
+    rows = Merchants.list_for_business(business_id)
+
+    json(conn, %{
+      business_id: business_id,
+      destinations: Enum.map(rows, &destination_json/1),
+      active_destination_id: active_id(rows)
+    })
+  end
+
+  @doc "GET /internal/v1/merchants/:business_id/destinations/:destination_id"
+  def show_destination(conn, %{"business_id" => business_id, "destination_id" => id}) do
+    case Merchants.get_destination(business_id, id) do
+      %Destination{} = dest -> json(conn, destination_json(dest))
+      nil -> {:error, :not_found}
+    end
+  end
+
   @doc "POST /internal/v1/merchants/:business_id/confirm"
-  def confirm(conn, %{"business_id" => business_id}) do
-    case Merchants.confirm_destination(business_id) do
+  def confirm(conn, %{"business_id" => business_id} = params) do
+    dest_id = params["destination_id"] || params["id"]
+    do_confirm(conn, business_id, dest_id)
+  end
+
+  @doc "POST /internal/v1/merchants/:business_id/destinations/:destination_id/confirm"
+  def confirm_destination(conn, %{
+        "business_id" => business_id,
+        "destination_id" => dest_id
+      }) do
+    do_confirm(conn, business_id, dest_id)
+  end
+
+  @doc "POST /internal/v1/merchants/:business_id/destinations/:destination_id/activate"
+  def activate_destination(conn, %{
+        "business_id" => business_id,
+        "destination_id" => dest_id
+      }) do
+    case Merchants.activate_destination(business_id, dest_id) do
+      {:ok, %Destination{} = dest} ->
+        json(conn, destination_json(dest))
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+
+      {:error, :not_verified} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: "destination_not_verified",
+          message: "Confirm this destination before using it for collections"
+        })
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp do_confirm(conn, business_id, dest_id) do
+    case Merchants.confirm_destination(business_id, dest_id) do
       {:ok, %Destination{} = dest} ->
         json(conn, destination_json(dest))
 
@@ -86,12 +148,13 @@ defmodule MalipoWeb.MerchantController do
 
   @doc "GET /internal/v1/merchants/:business_id"
   def show(conn, %{"business_id" => business_id}) do
-    dest = Merchants.get_destination(business_id)
+    dest = Merchants.get_active_destination(business_id)
     key = Merchants.get_active_key(business_id)
 
     json(conn, %{
       business_id: business_id,
       destination: if(dest, do: destination_json(dest), else: nil),
+      destinations_count: Merchants.list_for_business(business_id) |> length(),
       client_id: key && key.client_id,
       webhook_url: key && key.webhook_url,
       collections_allowed: Merchants.collections_allowed?(business_id)
@@ -128,6 +191,7 @@ defmodule MalipoWeb.MerchantController do
 
   defp destination_json(%Destination{} = d) do
     %{
+      id: d.id,
       kind: d.kind,
       till_number: d.till_number,
       paybill_number: d.paybill_number,
@@ -135,7 +199,17 @@ defmodule MalipoWeb.MerchantController do
       bank_id: d.bank_id,
       display_name: d.display_name,
       verified: d.verified,
-      activated: d.activated
+      activated: d.activated,
+      active: d.active,
+      in_use: d.active,
+      inserted_at: d.inserted_at && DateTime.to_iso8601(d.inserted_at)
     }
+  end
+
+  defp active_id(rows) do
+    case Enum.find(rows, & &1.active) do
+      %Destination{id: id} -> id
+      nil -> nil
+    end
   end
 end
