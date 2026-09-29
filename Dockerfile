@@ -29,6 +29,7 @@ COPY priv priv
 COPY lib lib
 COPY assets assets
 
+RUN mix assets.setup
 RUN mix assets.deploy
 RUN mix compile
 
