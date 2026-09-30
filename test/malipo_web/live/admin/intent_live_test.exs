@@ -12,7 +12,12 @@ defmodule MalipoWeb.Admin.IntentLiveTest do
         payer_msisdn: "0712345678"
       })
 
-    {:ok, prompted} = Intents.mark_prompted(intent, %{checkout_request_id: "ws_detail_1"})
+    {:ok, prompted} =
+      Intents.mark_prompted(intent, %{
+        checkout_request_id: "ws_detail_1",
+        request_payload: %{"account_reference" => "01123456789000", "party_b" => "400200"}
+      })
+
     {:ok, settled} = Intents.mark_settled(prompted, %{receipt: "DETAILRCPT1"})
 
     {:ok, _view, html} =
@@ -24,6 +29,8 @@ defmodule MalipoWeb.Admin.IntentLiveTest do
     assert html =~ "biz_detail"
     assert html =~ "Attribution"
     assert html =~ "Not attributed"
+    assert html =~ "Account ref"
+    assert html =~ "01123456789000"
     assert html =~ "Attempts"
     assert html =~ "intent.settled"
   end

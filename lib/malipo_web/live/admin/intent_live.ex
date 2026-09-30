@@ -56,6 +56,7 @@ defmodule MalipoWeb.Admin.IntentLive do
           <.field label="Business" value={@detail.intent.business_id} mono />
           <.field label="Attribution" value={attribution(@detail)} />
           <.field label="Destination id" value={destination_id(@detail.intent) || "—"} mono />
+          <.field label="Account ref sent" value={account_reference(@detail)} mono />
           <.field label="Rail" value={@detail.intent.rail} />
           <.field label="Payer MSISDN" value={mask(@detail.intent.payer_msisdn)} mono />
           <.field label="Idempotency key" value={@detail.intent.idempotency_key} mono />
@@ -102,6 +103,7 @@ defmodule MalipoWeb.Admin.IntentLive do
                 <th>#</th>
                 <th>Status</th>
                 <th>Checkout request id</th>
+                <th>Account ref</th>
                 <th>When</th>
                 <th>Failure</th>
               </tr>
@@ -113,6 +115,7 @@ defmodule MalipoWeb.Admin.IntentLive do
                   <span class={"badge badge-sm " <> status_class(attempt.status)}>{attempt.status}</span>
                 </td>
                 <td class="font-mono text-xs">{attempt.checkout_request_id || "—"}</td>
+                <td class="font-mono text-xs">{attempt_account_reference(attempt)}</td>
                 <td class="whitespace-nowrap text-xs text-base-content/50">
                   {fmt(attempt.inserted_at)}
                 </td>
@@ -211,6 +214,21 @@ defmodule MalipoWeb.Admin.IntentLive do
       true -> "Not attributed"
     end
   end
+
+  defp account_reference(detail) do
+    detail.attempts
+    |> List.last()
+    |> case do
+      %{request_payload: %{"account_reference" => ref}} when is_binary(ref) -> ref
+      _ -> "—"
+    end
+  end
+
+  defp attempt_account_reference(%{request_payload: %{"account_reference" => ref}})
+       when is_binary(ref),
+       do: ref
+
+  defp attempt_account_reference(_attempt), do: "—"
 
   defp destination_id(intent) do
     case intent.context do

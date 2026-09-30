@@ -116,9 +116,9 @@ defmodule Malipo.Rails.DarajaTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       payload = Jason.decode!(body)
 
-      # A 13-digit account ending in zeros must reach Daraja whole — truncating
-      # it (e.g. to 12) pays the wrong account.
-      assert payload["AccountReference"] == "0112345678900"
+      # A 14-digit account ending in zeros must reach Daraja whole — truncating
+      # it (e.g. to 12) drops the last two digits and pays the wrong account.
+      assert payload["AccountReference"] == "01123456789000"
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
@@ -129,7 +129,29 @@ defmodule Malipo.Rails.DarajaTest do
              Daraja.push(creds, %{
                amount: Decimal.new("1.00"),
                phone: "0712345678",
-               account_reference: "0112345678900",
+               account_reference: "0112-3456-7890-00",
+               transaction_desc: "Bank settlement",
+               callback_url: "https://kiosk.ke"
+             })
+  end
+
+  test "push/2 rejects an account reference with no letters or digits", %{creds: creds} do
+    assert {:error, %Failure{kind: :invalid_account_reference}} =
+             Daraja.push(creds, %{
+               amount: Decimal.new("1.00"),
+               phone: "0712345678",
+               account_reference: "  --  ",
+               transaction_desc: "Bank settlement",
+               callback_url: "https://kiosk.ke"
+             })
+  end
+
+  test "push/2 rejects an over-long account reference instead of truncating", %{creds: creds} do
+    assert {:error, %Failure{kind: :account_reference_too_long}} =
+             Daraja.push(creds, %{
+               amount: Decimal.new("1.00"),
+               phone: "0712345678",
+               account_reference: String.duplicate("1", 25),
                transaction_desc: "Bank settlement",
                callback_url: "https://kiosk.ke"
              })

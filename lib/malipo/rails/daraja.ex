@@ -13,6 +13,12 @@ defmodule Malipo.Rails.Daraja do
   alias Malipo.Rails.Daraja.{Client, Credentials, Password}
   alias Malipo.Rails.Failure
 
+  # Daraja's AccountReference is alphanumeric and bounded. We never silently
+  # truncate it (that misroutes money to the wrong account), so an empty or
+  # over-long value fails loudly instead. 20 is a generous ceiling (the C2B
+  # BillRefNumber limit); anything longer is almost certainly a mistake.
+  @max_account_reference 20
+
   @impl true
   def validate(raw_creds) do
     with {:ok, creds} <- Credentials.normalise(raw_creds),
@@ -95,6 +101,7 @@ defmodule Malipo.Rails.Daraja do
 
     with {:ok, amount} <- amount(request),
          {:ok, receiver} <- transfer_receiver(request),
+         {:ok, account_ref} <- account_reference(request["account_reference"]),
          {:ok, result_url} <- endpoint_url(request["result_url"], "ResultURL"),
          {:ok, timeout_url} <- endpoint_url(request["timeout_url"], "QueueTimeOutURL") do
       {:ok,
@@ -107,7 +114,7 @@ defmodule Malipo.Rails.Daraja do
          "Amount" => amount,
          "PartyA" => creds.shortcode,
          "PartyB" => receiver.code,
-         "AccountReference" => account_reference(request["account_reference"]),
+         "AccountReference" => account_ref,
          "Remarks" => truncate(request["remarks"] || "Malipo fees", 100),
          "QueueTimeOutURL" => timeout_url,
          "ResultURL" => result_url
@@ -244,7 +251,9 @@ defmodule Malipo.Rails.Daraja do
 
     with {:ok, phone} <- phone(request),
          {:ok, amount} <- amount(request),
-         {:ok, callback} <- callback_url(request) do
+         {:ok, callback} <- callback_url(request),
+         {:ok, account_ref} <-
+           account_reference(request["account_reference"] || creds.account_reference) do
       timestamp = Password.timestamp(DateTime.utc_now())
       password = Password.build(creds.shortcode, creds.passkey, timestamp)
       party_b = party_b_for_push(creds, request)
@@ -255,9 +264,6 @@ defmodule Malipo.Rails.Daraja do
           nil -> Credentials.transaction_type(effective_creds)
           type -> type
         end
-
-      account_ref =
-        account_reference(request["account_reference"] || creds.account_reference)
 
       desc = truncate(request["transaction_desc"] || request["description"] || "Payment", 13)
 
@@ -446,15 +452,34 @@ defmodule Malipo.Rails.Daraja do
     end
   end
 
-  defp account_reference(nil), do: "Kiosk"
+  defp account_reference(nil), do: {:ok, "Kiosk"}
 
   # Daraja wants alphanumerics only. Do **not** truncate: for a bank/paybill
   # settlement the account reference *is* the destination, so dropping the tail
   # (e.g. an account number ending in zeros) silently pays the wrong account.
-  # Send it whole and let Daraja reject it if it is genuinely unusable.
   defp account_reference(raw) when is_binary(raw) do
     cleaned = Regex.replace(~r/[^A-Za-z0-9]/, raw, "")
-    if cleaned == "", do: "Kiosk", else: cleaned
+
+    cond do
+      cleaned == "" ->
+        {:error,
+         Failure.new(
+           :invalid_account_reference,
+           "Settlement account number has no letters or digits",
+           retryable?: false
+         )}
+
+      byte_size(cleaned) > @max_account_reference ->
+        {:error,
+         Failure.new(
+           :account_reference_too_long,
+           "Account reference is #{byte_size(cleaned)} chars; Daraja allows #{@max_account_reference}",
+           retryable?: false
+         )}
+
+      true ->
+        {:ok, cleaned}
+    end
   end
 
   defp truncate(value, max) when is_binary(value) do
