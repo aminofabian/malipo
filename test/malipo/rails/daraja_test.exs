@@ -109,6 +109,32 @@ defmodule Malipo.Rails.DarajaTest do
     assert result.merchant_request_id == "29115-34620561-1"
   end
 
+  test "push/2 keeps a long bank account reference intact", %{bypass: bypass, creds: creds} do
+    stub_oauth(bypass)
+
+    Bypass.expect(bypass, "POST", "/mpesa/stkpush/v1/processrequest", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      # A 13-digit account ending in zeros must reach Daraja whole — truncating
+      # it (e.g. to 12) pays the wrong account.
+      assert payload["AccountReference"] == "0112345678900"
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, fixture("stk_push_accepted.json"))
+    end)
+
+    assert {:ok, _result} =
+             Daraja.push(creds, %{
+               amount: Decimal.new("1.00"),
+               phone: "0712345678",
+               account_reference: "0112345678900",
+               transaction_desc: "Bank settlement",
+               callback_url: "https://kiosk.ke"
+             })
+  end
+
   test "push/2 honours request party_b for custody collection", %{bypass: bypass, creds: creds} do
     stub_oauth(bypass)
 

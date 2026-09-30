@@ -257,9 +257,7 @@ defmodule Malipo.Rails.Daraja do
         end
 
       account_ref =
-        account_reference(
-          request["account_reference"] || creds.account_reference
-        )
+        account_reference(request["account_reference"] || creds.account_reference)
 
       desc = truncate(request["transaction_desc"] || request["description"] || "Payment", 13)
 
@@ -450,9 +448,13 @@ defmodule Malipo.Rails.Daraja do
 
   defp account_reference(nil), do: "Kiosk"
 
+  # Daraja wants alphanumerics only. Do **not** truncate: for a bank/paybill
+  # settlement the account reference *is* the destination, so dropping the tail
+  # (e.g. an account number ending in zeros) silently pays the wrong account.
+  # Send it whole and let Daraja reject it if it is genuinely unusable.
   defp account_reference(raw) when is_binary(raw) do
     cleaned = Regex.replace(~r/[^A-Za-z0-9]/, raw, "")
-    if cleaned == "", do: "Kiosk", else: truncate(cleaned, 12)
+    if cleaned == "", do: "Kiosk", else: cleaned
   end
 
   defp truncate(value, max) when is_binary(value) do
