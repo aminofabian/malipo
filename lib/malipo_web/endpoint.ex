@@ -38,6 +38,8 @@ defmodule MalipoWeb.Endpoint do
     plug Phoenix.Ecto.CheckRepoStatus, otp_app: :malipo
   end
 
+  plug MalipoWeb.Plugs.ForwardedScheme
+
   plug Phoenix.LiveDashboard.RequestLogger,
     param_key: "request_logger",
     cookie_key: "request_logger"
