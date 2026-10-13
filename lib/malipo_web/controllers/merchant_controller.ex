@@ -183,14 +183,6 @@ defmodule MalipoWeb.MerchantController do
         conn
         |> put_status(:conflict)
         |> json(%{error: "no_key", message: "Issue keys first"})
-
-      {:error, :not_revealable} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{
-          error: "rotate_required",
-          message: "Rotate this key once to enable revealing it"
-        })
     end
   end
 

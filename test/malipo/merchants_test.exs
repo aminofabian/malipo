@@ -145,4 +145,26 @@ defmodule Malipo.MerchantsTest do
     # No test key issued for this business yet.
     assert {:error, :no_active_key} = Merchants.reveal_keys("biz_rev", "test")
   end
+
+  test "reveal_keys mints a secret for a key that predates reveal" do
+    assert {:ok, _} =
+             Merchants.put_destination("biz_leg", %{"kind" => "till", "till_number" => "5738421"})
+
+    assert {:ok, _} = Merchants.confirm_destination("biz_leg")
+    assert {:ok, original} = Merchants.provision_keys("biz_leg")
+
+    # Simulate a legacy row: a hash but no recoverable client secret.
+    Malipo.Repo.update_all(
+      from(k in Malipo.Merchants.ApiKey, where: k.business_id == "biz_leg"),
+      set: [client_secret: nil]
+    )
+
+    assert {:ok, revealed} = Merchants.reveal_keys("biz_leg")
+    assert revealed.rotated == true
+    assert String.starts_with?(revealed.client_secret, "sk_live_")
+    assert revealed.client_secret != original.client_secret
+
+    # The freshly minted secret authenticates.
+    assert {:ok, "biz_leg"} = Merchants.authenticate_secret(revealed.client_secret)
+  end
 end

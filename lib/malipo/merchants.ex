@@ -270,26 +270,61 @@ defmodule Malipo.Merchants do
   end
 
   @doc """
-  Decrypt and return the key's secrets for a reveal request.
+  Return the active key's secrets for a reveal request.
 
-  `{:error, :not_revealable}` means the row predates encrypted client-secret
-  storage — rotate once to enable revealing it.
+  A key issued before secrets were stored encrypted has no recoverable client
+  secret. Rather than make the merchant rotate by hand, we mint a fresh secret
+  for whatever is missing and return it (flagged `rotated: true`). The webhook
+  secret is left untouched when it is already stored.
   """
-  @spec reveal_keys(String.t(), String.t()) ::
-          {:ok, map()} | {:error, :no_active_key | :not_revealable}
+  @spec reveal_keys(String.t(), String.t()) :: {:ok, map()} | {:error, :no_active_key | term()}
   def reveal_keys(business_id, mode \\ "live") do
     case get_active_key(business_id, mode) do
-      %ApiKey{client_secret: secret, webhook_secret: webhook, client_id: id, mode: m}
-      when is_binary(secret) and secret != "" ->
-        {:ok, %{client_id: id, client_secret: secret, webhook_secret: webhook, mode: m}}
-
-      %ApiKey{} ->
-        {:error, :not_revealable}
-
-      nil ->
-        {:error, :no_active_key}
+      nil -> {:error, :no_active_key}
+      %ApiKey{} = key -> revealable(key)
     end
   end
+
+  defp revealable(%ApiKey{client_secret: cs, webhook_secret: wh} = key)
+       when is_binary(cs) and cs != "" and is_binary(wh) and wh != "" do
+    {:ok, reveal_map(key, false)}
+  end
+
+  defp revealable(%ApiKey{} = key) do
+    client_secret = present_or_new(key.client_secret, client_secret_prefix(key.mode))
+    webhook_secret = present_or_new(key.webhook_secret, webhook_secret_prefix(key.mode))
+
+    attrs = %{
+      client_secret: client_secret,
+      client_secret_hash: hash(client_secret),
+      webhook_secret: webhook_secret,
+      webhook_secret_hash: hash(webhook_secret)
+    }
+
+    case key |> ApiKey.changeset(attrs) |> Repo.update() do
+      {:ok, updated} -> {:ok, reveal_map(updated, true)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp present_or_new(value, _prefix) when is_binary(value) and value != "", do: value
+  defp present_or_new(_value, prefix), do: token(prefix)
+
+  defp reveal_map(%ApiKey{} = key, rotated) do
+    %{
+      client_id: key.client_id,
+      client_secret: key.client_secret,
+      webhook_secret: key.webhook_secret,
+      mode: key.mode,
+      rotated: rotated
+    }
+  end
+
+  defp client_secret_prefix("test"), do: "sk_test_"
+  defp client_secret_prefix(_live), do: "sk_live_"
+
+  defp webhook_secret_prefix("test"), do: "whsec_test_"
+  defp webhook_secret_prefix(_live), do: "whsec_"
 
   @doc "Recent destinations newest-first (ops console)."
   @spec list_destinations(non_neg_integer()) :: [Destination.t()]
