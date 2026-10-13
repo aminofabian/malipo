@@ -11,6 +11,11 @@ defmodule Malipo.Merchants do
   alias Malipo.Merchants.{ApiKey, Destination}
   alias Malipo.Repo
 
+  @typedoc "An authenticated public-API caller and the mode its key belongs to."
+  @type principal :: %{business_id: String.t(), mode: String.t()}
+
+  @modes ~w(live test)
+
   @doc "The destination currently used for STK / collections."
   @spec get_destination(String.t()) :: Destination.t() | nil
   def get_destination(business_id) when is_binary(business_id) do
@@ -130,21 +135,32 @@ defmodule Malipo.Merchants do
   end
 
   @doc """
-  Issue (or rotate) API keys. Returns plaintext secrets **once**.
+  Issue (or rotate) API keys for a `mode`. Returns plaintext secrets **once**.
+
+  Live keys require a verified destination; test (sandbox) keys do not — a
+  developer should be able to integrate before their till is verified (D5).
   """
-  @spec provision_keys(String.t()) ::
-          {:ok, map()} | {:error, :destination_not_ready | Ecto.Changeset.t()}
-  def provision_keys(business_id) when is_binary(business_id) do
+  @spec provision_keys(String.t(), String.t()) ::
+          {:ok, map()}
+          | {:error, :destination_not_ready | :invalid_mode | Ecto.Changeset.t()}
+  def provision_keys(business_id, mode \\ "live")
+
+  def provision_keys(business_id, "live") when is_binary(business_id) do
     if any_verified_destination?(business_id) do
-      issue_keys(business_id)
+      issue_keys(business_id, "live")
     else
       {:error, :destination_not_ready}
     end
   end
 
-  defp issue_keys(business_id) do
-    client_secret = token("sk_live_")
-    webhook_secret = token("whsec_")
+  def provision_keys(business_id, "test") when is_binary(business_id) do
+    issue_keys(business_id, "test")
+  end
+
+  def provision_keys(_business_id, _mode), do: {:error, :invalid_mode}
+
+  defp issue_keys(business_id, mode) do
+    {client_secret, webhook_secret} = secrets_for(mode)
 
     secret_attrs = %{
       client_secret_hash: hash(client_secret),
@@ -153,7 +169,7 @@ defmodule Malipo.Merchants do
     }
 
     result =
-      case get_active_key(business_id) do
+      case get_active_key(business_id, mode) do
         %ApiKey{} = key ->
           key |> ApiKey.changeset(secret_attrs) |> Repo.update()
 
@@ -162,7 +178,8 @@ defmodule Malipo.Merchants do
           |> ApiKey.changeset(
             Map.merge(secret_attrs, %{
               business_id: business_id,
-              client_id: stable_client_id(business_id)
+              mode: mode,
+              client_id: stable_client_id(business_id, mode)
             })
           )
           |> Repo.insert()
@@ -175,7 +192,8 @@ defmodule Malipo.Merchants do
            client_id: key.client_id,
            client_secret: client_secret,
            webhook_secret: webhook_secret,
-           business_id: business_id
+           business_id: business_id,
+           mode: key.mode
          }}
 
       {:error, reason} ->
@@ -183,43 +201,67 @@ defmodule Malipo.Merchants do
     end
   end
 
+  defp secrets_for("test"), do: {token("sk_test_"), token("whsec_test_")}
+  defp secrets_for(_live), do: {token("sk_live_"), token("whsec_")}
+
   @doc "Authenticate HTTP Basic `client_id:client_secret`. Returns business_id."
   @spec authenticate(String.t(), String.t()) ::
           {:ok, String.t()} | {:error, :unauthorized}
   def authenticate(client_id, client_secret)
       when is_binary(client_id) and is_binary(client_secret) do
-    case Repo.get_by(ApiKey, client_id: client_id) do
-      %ApiKey{} = key -> accept_secret(key, client_secret)
-      nil -> {:error, :unauthorized}
+    with {:ok, principal} <- principal_by_pair(client_id, client_secret) do
+      {:ok, principal.business_id}
     end
   end
 
   @spec authenticate_secret(String.t()) :: {:ok, String.t()} | {:error, :unauthorized}
   def authenticate_secret(secret) when is_binary(secret) do
+    with {:ok, principal} <- principal_by_secret(secret) do
+      {:ok, principal.business_id}
+    end
+  end
+
+  @doc "Authenticate a bearer secret, returning the `principal` (business + mode)."
+  @spec principal_by_secret(String.t()) :: {:ok, principal()} | {:error, :unauthorized}
+  def principal_by_secret(secret) when is_binary(secret) do
     secret = String.trim(secret)
 
     if secret == "" do
       {:error, :unauthorized}
     else
       case Repo.get_by(ApiKey, client_secret_hash: hash(secret)) do
-        %ApiKey{} = key -> accept_secret(key, secret)
+        %ApiKey{} = key -> accept_principal(key, secret)
         nil -> {:error, :unauthorized}
       end
     end
   end
 
-  defp accept_secret(%ApiKey{} = key, secret) do
+  @doc "Authenticate HTTP Basic `client_id:client_secret`, returning the `principal`."
+  @spec principal_by_pair(String.t(), String.t()) ::
+          {:ok, principal()} | {:error, :unauthorized}
+  def principal_by_pair(client_id, client_secret)
+      when is_binary(client_id) and is_binary(client_secret) do
+    case Repo.get_by(ApiKey, client_id: client_id) do
+      %ApiKey{} = key -> accept_principal(key, client_secret)
+      nil -> {:error, :unauthorized}
+    end
+  end
+
+  defp accept_principal(%ApiKey{} = key, secret) do
     if ApiKey.active?(key) and secure_hash_eq(key.client_secret_hash, secret) do
-      {:ok, key.business_id}
+      {:ok, %{business_id: key.business_id, mode: key.mode || "live"}}
     else
       {:error, :unauthorized}
     end
   end
 
-  @spec get_active_key(String.t()) :: ApiKey.t() | nil
-  def get_active_key(business_id) when is_binary(business_id) do
+  @doc "The active key for a mode (`live` default)."
+  @spec get_active_key(String.t(), String.t()) :: ApiKey.t() | nil
+  def get_active_key(business_id, mode \\ "live")
+
+  def get_active_key(business_id, mode) when is_binary(business_id) and mode in @modes do
     from(k in ApiKey,
-      where: k.business_id == ^business_id and is_nil(k.revoked_at),
+      where: k.business_id == ^business_id and k.mode == ^mode and is_nil(k.revoked_at),
       order_by: [desc: k.inserted_at],
       limit: 1
     )
@@ -233,20 +275,20 @@ defmodule Malipo.Merchants do
     |> Repo.all()
   end
 
-  @spec set_webhook_url(String.t(), String.t() | nil) ::
+  @spec set_webhook_url(String.t(), String.t() | nil, String.t()) ::
           {:ok, ApiKey.t()} | {:error, :no_active_key | :invalid_url | Ecto.Changeset.t()}
-  def set_webhook_url(business_id, url) when is_binary(business_id) do
+  def set_webhook_url(business_id, url, mode \\ "live") when is_binary(business_id) do
     url = url && String.trim(url)
 
     cond do
-      is_nil(url) or url == "" -> do_set_webhook(business_id, nil)
+      is_nil(url) or url == "" -> do_set_webhook(business_id, mode, nil)
       not valid_callback_url?(url) -> {:error, :invalid_url}
-      true -> do_set_webhook(business_id, url)
+      true -> do_set_webhook(business_id, mode, url)
     end
   end
 
-  defp do_set_webhook(business_id, url) do
-    case get_active_key(business_id) do
+  defp do_set_webhook(business_id, mode, url) do
+    case get_active_key(business_id, mode) do
       nil -> {:error, :no_active_key}
       %ApiKey{} = key -> key |> ApiKey.changeset(%{webhook_url: url}) |> Repo.update()
     end
@@ -277,16 +319,19 @@ defmodule Malipo.Merchants do
 
   defp resolve_confirm_row(business_id, id), do: get_destination(business_id, id)
 
-  defp stable_client_id(business_id) do
-    case get_active_key(business_id) || latest_key(business_id) do
+  defp stable_client_id(business_id, mode) do
+    case get_active_key(business_id, mode) || latest_key(business_id, mode) do
       %ApiKey{client_id: id} -> id
-      nil -> token("pk_live_")
+      nil -> token(client_id_prefix(mode))
     end
   end
 
-  defp latest_key(business_id) do
+  defp client_id_prefix("test"), do: "pk_test_"
+  defp client_id_prefix(_live), do: "pk_live_"
+
+  defp latest_key(business_id, mode) do
     from(k in ApiKey,
-      where: k.business_id == ^business_id,
+      where: k.business_id == ^business_id and k.mode == ^mode,
       order_by: [desc: k.inserted_at],
       limit: 1
     )
@@ -307,7 +352,9 @@ defmodule Malipo.Merchants do
     Map.put(attrs, "display_name", "Paybill " <> pb)
   end
 
-  defp maybe_display_name(%{"kind" => "bank", "paybill_number" => pb, "account_number" => acc} = attrs)
+  defp maybe_display_name(
+         %{"kind" => "bank", "paybill_number" => pb, "account_number" => acc} = attrs
+       )
        when is_binary(pb) and is_binary(acc) do
     Map.put(attrs, "display_name", "Bank paybill #{pb} · Acc #{acc}")
   end

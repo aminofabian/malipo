@@ -14,13 +14,17 @@ defmodule MalipoWeb.Admin.TransactionsLive do
     {"c2b", "Till receipts"}
   ]
 
+  @modes [{"live", "Live"}, {"test", "Test"}]
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, "Transactions")
      |> assign(:filters, @filters)
+     |> assign(:modes, @modes)
      |> assign(:filter, "all")
+     |> assign(:mode, "live")
      |> load()}
   end
 
@@ -30,10 +34,18 @@ defmodule MalipoWeb.Admin.TransactionsLive do
     {:noreply, socket |> assign(:filter, filter) |> load()}
   end
 
+  def handle_event("mode", %{"mode" => mode}, socket) when mode in ["live", "test"] do
+    {:noreply, socket |> assign(:mode, mode) |> load()}
+  end
+
   def handle_event("refresh", _params, socket), do: {:noreply, load(socket)}
 
   defp load(socket) do
-    assign(socket, :rows, Admin.list_transactions(100, socket.assigns.filter))
+    assign(
+      socket,
+      :rows,
+      Admin.list_transactions(100, socket.assigns.filter, socket.assigns.mode)
+    )
   end
 
   @impl true
@@ -48,6 +60,17 @@ defmodule MalipoWeb.Admin.TransactionsLive do
           </p>
         </div>
         <div class="flex items-center gap-2">
+          <div class="join">
+            <button
+              :for={{value, label} <- @modes}
+              type="button"
+              phx-click="mode"
+              phx-value-mode={value}
+              class={["btn btn-sm join-item", @mode == value && "btn-active"]}
+            >
+              {label}
+            </button>
+          </div>
           <div class="join">
             <button
               :for={{value, label} <- @filters}

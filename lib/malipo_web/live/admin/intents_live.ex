@@ -5,17 +5,27 @@ defmodule MalipoWeb.Admin.IntentsLive do
 
   alias Malipo.Intents
 
+  @modes [{"live", "Live"}, {"test", "Test"}]
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(:page_title, "Intents")
-     |> assign(:intents, Intents.list_recent(50))}
+     |> assign(:modes, @modes)
+     |> assign(:mode, "live")
+     |> load()}
   end
 
   @impl true
-  def handle_event("refresh", _params, socket) do
-    {:noreply, assign(socket, :intents, Intents.list_recent(50))}
+  def handle_event("mode", %{"mode" => mode}, socket) when mode in ["live", "test"] do
+    {:noreply, socket |> assign(:mode, mode) |> load()}
+  end
+
+  def handle_event("refresh", _params, socket), do: {:noreply, load(socket)}
+
+  defp load(socket) do
+    assign(socket, :intents, Intents.list_recent(50, socket.assigns.mode))
   end
 
   @impl true
@@ -28,6 +38,18 @@ defmodule MalipoWeb.Admin.IntentsLive do
           <p class="mt-1 text-sm text-base-content/60">Recent STK intents — newest first.</p>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" phx-click="refresh">Refresh</button>
+      </div>
+
+      <div class="join mb-4">
+        <button
+          :for={{value, label} <- @modes}
+          type="button"
+          phx-click="mode"
+          phx-value-mode={value}
+          class={["btn btn-sm join-item", @mode == value && "btn-active"]}
+        >
+          {label}
+        </button>
       </div>
 
       <div :if={@intents == []} class="py-16 text-center text-sm text-base-content/50">

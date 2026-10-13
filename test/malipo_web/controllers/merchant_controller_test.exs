@@ -94,4 +94,68 @@ defmodule MalipoWeb.MerchantControllerTest do
     assert body["received_total"] == "0"
     assert body["by_destination"] == []
   end
+
+  test "sandbox keys, payments by mode, and reset via internal API", %{conn: conn} do
+    # Test keys need no verified destination (D5).
+    test_keys =
+      post(conn, ~p"/internal/v1/merchants/biz_sbx_api/keys", %{"mode" => "test"})
+      |> json_response(201)
+
+    assert String.starts_with?(test_keys["client_id"], "pk_test_")
+    assert String.starts_with?(test_keys["client_secret"], "sk_test_")
+    assert test_keys["mode"] == "test"
+
+    show = get(conn, ~p"/internal/v1/merchants/biz_sbx_api") |> json_response(200)
+    assert show["has_test_key"] == true
+    assert show["has_live_key"] == false
+
+    # A live intent (create/1 reserves without pushing) and a sandbox one.
+    {:ok, _live} =
+      Malipo.Intents.create(%{
+        "business_id" => "biz_sbx_api",
+        "amount" => "20.00",
+        "payer_msisdn" => "0712345678",
+        "idempotency_key" => "sbx-live-1"
+      })
+
+    {:ok, _sandbox} =
+      Malipo.Intents.create_and_push(%{
+        "business_id" => "biz_sbx_api",
+        "mode" => "test",
+        "amount" => "2.00",
+        "currency" => "KES",
+        "payer_msisdn" => "254000000001",
+        "idempotency_key" => "sbx-api-1"
+      })
+
+    live =
+      get(conn, ~p"/internal/v1/merchants/biz_sbx_api/payments?mode=live") |> json_response(200)
+
+    assert length(live["payments"]) == 1
+    assert hd(live["payments"])["amount"] == "20.00"
+
+    test_list =
+      get(conn, ~p"/internal/v1/merchants/biz_sbx_api/payments?mode=test") |> json_response(200)
+
+    assert test_list["mode"] == "test"
+    assert length(test_list["payments"]) == 1
+
+    reset =
+      post(conn, ~p"/internal/v1/merchants/biz_sbx_api/test-data/reset", %{})
+      |> json_response(200)
+
+    assert reset["intents"] == 1
+    assert reset["outbox"] == 1
+
+    after_reset =
+      get(conn, ~p"/internal/v1/merchants/biz_sbx_api/payments?mode=test") |> json_response(200)
+
+    assert after_reset["payments"] == []
+
+    # The live intent survives the reset.
+    live_after =
+      get(conn, ~p"/internal/v1/merchants/biz_sbx_api/payments?mode=live") |> json_response(200)
+
+    assert length(live_after["payments"]) == 1
+  end
 end

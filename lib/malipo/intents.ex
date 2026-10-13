@@ -18,11 +18,13 @@ defmodule Malipo.Intents do
   alias Malipo.Rails.Daraja.Platform
   alias Malipo.Rails.Failure
   alias Malipo.Repo
+  alias Malipo.Sandbox
 
   @default_ttl_seconds 90
   @till_await_prefix "till-await-"
   @till_await_ttl_seconds 15 * 60
   @till_await_replaced "Replaced by a new till payment wait"
+  @modes ~w(live test)
 
   @doc "Synthetic checkout ids for Buy Goods awaits (no STK poll)."
   @spec till_await_checkout?(String.t() | nil) :: boolean()
@@ -70,6 +72,31 @@ defmodule Malipo.Intents do
     Repo.get_by(Intent, business_id: business_id, idempotency_key: key)
   end
 
+  @doc """
+  Delete a business's sandbox data — every `test` intent (attempts cascade) and
+  every `test` outbox event. Live rows are untouched. (Sandbox D7: Reset test data.)
+  """
+  @spec reset_test_data(String.t()) ::
+          {:ok, %{intents: non_neg_integer(), outbox: non_neg_integer()}}
+  def reset_test_data(business_id) when is_binary(business_id) do
+    {:ok, result} =
+      Repo.transaction(fn ->
+        {outbox, _} =
+          from(o in Malipo.Outbox.Event,
+            where: o.business_id == ^business_id and o.mode == "test"
+          )
+          |> Repo.delete_all()
+
+        {intents, _} =
+          from(i in Intent, where: i.business_id == ^business_id and i.mode == "test")
+          |> Repo.delete_all()
+
+        %{intents: intents, outbox: outbox}
+      end)
+
+    {:ok, result}
+  end
+
   @doc "Record a successful push: pending → prompted, plus an attempt row."
   @spec mark_prompted(Intent.t(), map()) ::
           {:ok, Intent.t()} | {:error, Ecto.Changeset.t() | term()}
@@ -107,7 +134,7 @@ defmodule Malipo.Intents do
     end
   end
 
-  @doc "Settle an intent with a provider receipt (writes outbox in the same txn)."
+  @doc "Settle an intent with a provider receipt (writes outbox + fee for live intents)."
   @spec mark_settled(Intent.t(), map()) ::
           {:ok, Intent.t()} | {:error, Ecto.Changeset.t() | term()}
   def mark_settled(%Intent{} = intent, attrs) do
@@ -120,21 +147,8 @@ defmodule Malipo.Intents do
 
     Multi.new()
     |> Multi.update(:intent, Intent.mark_settled_changeset(intent, attrs))
-    |> Multi.insert(:outbox, fn %{intent: settled} ->
-      Outbox.build_for_intent(settled, "intent.settled")
-    end)
-    |> Multi.merge(fn %{outbox: row} ->
-      Outbox.enqueue_dispatch(Multi.new(), row)
-    end)
-    |> Multi.run(:sweep, fn repo, %{intent: settled} ->
-      case Malipo.Fees.sweep_for(settled) do
-        nil -> {:ok, nil}
-        sweep_attrs -> Malipo.Fees.insert_sweep(repo, sweep_attrs)
-      end
-    end)
-    |> Multi.merge(fn results ->
-      Malipo.Fees.enqueue_sweep(Multi.new(), Map.get(results, :sweep))
-    end)
+    |> settlement_side_effects(intent, "intent.settled")
+    |> fee_sweep_side_effects(intent)
     |> Repo.transaction()
     |> case do
       {:ok, %{intent: settled}} -> {:ok, settled}
@@ -142,7 +156,34 @@ defmodule Malipo.Intents do
     end
   end
 
-  @doc "Fail a pending/prompted intent (writes outbox in the same txn)."
+  # Both modes write an outbox event — the merchant webhook is delivered from it.
+  # The dispatcher skips the monolith for `test` events, so sandbox money never
+  # reaches the monolith.
+  defp settlement_side_effects(multi, _intent, event) do
+    multi
+    |> Multi.insert(:outbox, fn %{intent: row} -> Outbox.build_for_intent(row, event) end)
+    |> Multi.merge(fn %{outbox: row} -> Outbox.enqueue_dispatch(Multi.new(), row) end)
+  end
+
+  # Sandbox settlements never accrue a fee: the sweep is a live-money action.
+  defp fee_sweep_side_effects(multi, intent) do
+    if Intent.live?(intent) do
+      multi
+      |> Multi.run(:sweep, fn repo, %{intent: settled} ->
+        case Malipo.Fees.sweep_for(settled) do
+          nil -> {:ok, nil}
+          sweep_attrs -> Malipo.Fees.insert_sweep(repo, sweep_attrs)
+        end
+      end)
+      |> Multi.merge(fn results ->
+        Malipo.Fees.enqueue_sweep(Multi.new(), Map.get(results, :sweep))
+      end)
+    else
+      multi
+    end
+  end
+
+  @doc "Fail a pending/prompted intent (writes outbox for live intents)."
   @spec mark_failed(Intent.t(), map()) ::
           {:ok, Intent.t()} | {:error, Ecto.Changeset.t() | term()}
   def mark_failed(%Intent{} = intent, attrs) do
@@ -154,12 +195,7 @@ defmodule Malipo.Intents do
 
     Multi.new()
     |> Multi.update(:intent, Intent.mark_failed_changeset(intent, attrs))
-    |> Multi.insert(:outbox, fn %{intent: failed} ->
-      Outbox.build_for_intent(failed, "intent.failed")
-    end)
-    |> Multi.merge(fn %{outbox: row} ->
-      Outbox.enqueue_dispatch(Multi.new(), row)
-    end)
+    |> settlement_side_effects(intent, "intent.failed")
     |> Repo.transaction()
     |> case do
       {:ok, %{intent: failed}} -> {:ok, failed}
@@ -167,7 +203,7 @@ defmodule Malipo.Intents do
     end
   end
 
-  @doc "Expire a pending/prompted intent (late settle still allowed; writes outbox)."
+  @doc "Expire a pending/prompted intent (late settle still allowed; writes outbox for live intents)."
   @spec mark_expired(Intent.t(), map()) ::
           {:ok, Intent.t()} | {:error, Ecto.Changeset.t() | term()}
   def mark_expired(%Intent{} = intent, attrs \\ %{}) do
@@ -179,12 +215,7 @@ defmodule Malipo.Intents do
 
     Multi.new()
     |> Multi.update(:intent, Intent.mark_expired_changeset(intent, attrs))
-    |> Multi.insert(:outbox, fn %{intent: expired} ->
-      Outbox.build_for_intent(expired, "intent.expired")
-    end)
-    |> Multi.merge(fn %{outbox: row} ->
-      Outbox.enqueue_dispatch(Multi.new(), row)
-    end)
+    |> settlement_side_effects(intent, "intent.expired")
     |> Repo.transaction()
     |> case do
       {:ok, %{intent: expired}} -> {:ok, expired}
@@ -205,36 +236,37 @@ defmodule Malipo.Intents do
     |> Repo.all()
   end
 
-  @doc "Recent intents newest-first (ops console)."
-  @spec list_recent(non_neg_integer()) :: [Intent.t()]
-  def list_recent(limit \\ 50) do
+  @doc "Recent intents newest-first (ops console), for one mode."
+  @spec list_recent(non_neg_integer(), String.t()) :: [Intent.t()]
+  def list_recent(limit \\ 50, mode \\ "live") when mode in @modes do
     from(i in Intent,
+      where: i.mode == ^mode,
       order_by: [desc: i.inserted_at],
       limit: ^limit
     )
     |> Repo.all()
   end
 
-  @doc "Recent intents for one business (Connect keys page)."
-  @spec list_for_business(String.t(), non_neg_integer()) :: [Intent.t()]
-  def list_for_business(business_id, limit \\ 5)
-      when is_binary(business_id) and is_integer(limit) do
+  @doc "Recent live intents for one business (Connect keys page)."
+  @spec list_for_business(String.t(), non_neg_integer(), String.t()) :: [Intent.t()]
+  def list_for_business(business_id, limit \\ 5, mode \\ "live")
+      when is_binary(business_id) and is_integer(limit) and mode in @modes do
     from(i in Intent,
-      where: i.business_id == ^business_id,
+      where: i.business_id == ^business_id and i.mode == ^mode,
       order_by: [desc: i.inserted_at],
       limit: ^limit
     )
     |> Repo.all()
   end
 
-  @doc "Open prompted intents due for a status poll (excludes Buy Goods till-awaits)."
+  @doc "Open prompted intents due for a status poll (live only; excludes Buy Goods till-awaits)."
   @spec list_prompted_for_poll(non_neg_integer()) :: [Intent.t()]
   def list_prompted_for_poll(limit \\ 100) do
     prefix = @till_await_prefix <> "%"
 
     from(i in Intent,
       where:
-        i.status == "prompted" and
+        i.mode == "live" and i.status == "prompted" and
           (is_nil(i.checkout_request_id) or not like(i.checkout_request_id, ^prefix)),
       order_by: [asc: i.prompted_at],
       limit: ^limit
@@ -318,33 +350,41 @@ defmodule Malipo.Intents do
           | {:ok, Intent.t(), :replay}
           | {:error, term()}
   def create_and_push(attrs, opts \\ []) when is_map(attrs) and is_list(opts) do
+    mode = attrs |> stringify_keys() |> Map.get("mode") |> normalize_mode()
     creds = Keyword.get(opts, :creds) || Platform.credentials()
 
-    if is_nil(creds) do
-      {:error, :credentials_missing}
-    else
-      attrs = maybe_merge_on_settled(attrs)
+    cond do
+      # A live intent needs Daraja credentials; a sandbox intent never does.
+      mode == "live" and is_nil(creds) ->
+        {:error, :credentials_missing}
 
-      case create(attrs) do
-        {:ok, intent, :replay} ->
-          case intent.status do
-            "pending" ->
-              case push_stk(intent, creds, opts) do
-                {:ok, prompted} -> {:ok, prompted, :replay}
-                other -> other
-              end
+      true ->
+        attrs = maybe_merge_on_settled(attrs)
 
-            _ ->
-              {:ok, intent, :replay}
-          end
+        case create(attrs) do
+          {:ok, intent, :replay} ->
+            case intent.status do
+              "pending" ->
+                case push_stk(intent, creds, opts) do
+                  {:ok, prompted} -> {:ok, prompted, :replay}
+                  other -> other
+                end
 
-        {:ok, intent} ->
-          push_stk(intent, creds, opts)
+              _ ->
+                {:ok, intent, :replay}
+            end
 
-        other ->
-          other
-      end
+          {:ok, intent} ->
+            push_stk(intent, creds, opts)
+
+          other ->
+            other
+        end
     end
+  end
+
+  defp do_push(%Intent{mode: "test"} = intent, _creds, opts, fail_on_error?: _fail?) do
+    Sandbox.push(intent, opts)
   end
 
   defp do_push(%Intent{} = intent, creds, opts, fail_on_error?: fail?) do
@@ -519,8 +559,9 @@ defmodule Malipo.Intents do
 
   defp build_create_params(attrs) do
     attrs = stringify_keys(attrs)
+    mode = normalize_mode(attrs["mode"])
 
-    with {:ok, msisdn} <- Msisdn.normalise(attrs["payer_msisdn"]) do
+    with {:ok, msisdn} <- normalise_payer(attrs["payer_msisdn"], mode) do
       expires_at =
         case attrs["expires_at"] do
           %DateTime{} = dt -> dt
@@ -542,6 +583,7 @@ defmodule Malipo.Intents do
          business_id: attrs["business_id"],
          idempotency_key: attrs["idempotency_key"],
          rail: attrs["rail"] || "daraja",
+         mode: mode,
          amount: amount,
          currency: attrs["currency"] || "KES",
          payer_msisdn: msisdn,
@@ -550,6 +592,20 @@ defmodule Malipo.Intents do
        }}
     end
   end
+
+  # Reserved sandbox numbers (`2540…`) are valid in test mode only; any other
+  # phone must be a real Kenyan MSISDN.
+  defp normalise_payer(raw, "test") do
+    case Sandbox.normalise_msisdn(raw) do
+      {:ok, msisdn} -> {:ok, msisdn}
+      :error -> Msisdn.normalise(raw)
+    end
+  end
+
+  defp normalise_payer(raw, _live), do: Msisdn.normalise(raw)
+
+  defp normalize_mode("test"), do: "test"
+  defp normalize_mode(_), do: "live"
 
   defp merge_settlement_into_context(attrs) do
     ctx =

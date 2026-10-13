@@ -26,7 +26,7 @@ defmodule Malipo.Admin do
     day_ago = DateTime.add(now, -24, :hour)
     week_ago = DateTime.add(now, -7, :day)
 
-    settled = from(i in Intent, where: i.status == "settled")
+    settled = from(i in Intent, where: i.status == "settled" and i.mode == "live")
     matched_receipts = from(r in Receipt, where: r.status == "matched")
 
     %{
@@ -44,20 +44,36 @@ defmodule Malipo.Admin do
             :count,
             :id
           ),
-        keys: Repo.aggregate(from(k in ApiKey, where: is_nil(k.revoked_at)), :count, :id)
+        keys:
+          Repo.aggregate(
+            from(k in ApiKey, where: is_nil(k.revoked_at) and k.mode == "live"),
+            :count,
+            :id
+          )
       },
       intents: %{
-        total: Repo.aggregate(Intent, :count, :id),
+        total: Repo.aggregate(from(i in Intent, where: i.mode == "live"), :count, :id),
         settled: Repo.aggregate(settled, :count, :id),
-        failed: Repo.aggregate(from(i in Intent, where: i.status == "failed"), :count, :id),
+        failed:
+          Repo.aggregate(
+            from(i in Intent, where: i.status == "failed" and i.mode == "live"),
+            :count,
+            :id
+          ),
         open:
           Repo.aggregate(
-            from(i in Intent, where: i.status in ["pending", "prompted"]),
+            from(i in Intent,
+              where: i.status in ["pending", "prompted"] and i.mode == "live"
+            ),
             :count,
             :id
           ),
         last_24h:
-          Repo.aggregate(from(i in Intent, where: i.inserted_at >= ^day_ago), :count, :id),
+          Repo.aggregate(
+            from(i in Intent, where: i.inserted_at >= ^day_ago and i.mode == "live"),
+            :count,
+            :id
+          ),
         settled_volume: sum_amount(settled),
         settled_volume_24h: sum_amount(from(i in settled, where: i.settled_at >= ^day_ago)),
         settled_volume_7d: sum_amount(from(i in settled, where: i.settled_at >= ^week_ago))
@@ -70,9 +86,24 @@ defmodule Malipo.Admin do
         matched_volume: sum_amount(matched_receipts)
       },
       outbox: %{
-        pending: Repo.aggregate(from(o in Event, where: o.status == "pending"), :count, :id),
-        failed: Repo.aggregate(from(o in Event, where: o.status == "failed"), :count, :id),
-        delivered: Repo.aggregate(from(o in Event, where: o.status == "delivered"), :count, :id)
+        pending:
+          Repo.aggregate(
+            from(o in Event, where: o.status == "pending" and o.mode == "live"),
+            :count,
+            :id
+          ),
+        failed:
+          Repo.aggregate(
+            from(o in Event, where: o.status == "failed" and o.mode == "live"),
+            :count,
+            :id
+          ),
+        delivered:
+          Repo.aggregate(
+            from(o in Event, where: o.status == "delivered" and o.mode == "live"),
+            :count,
+            :id
+          )
       }
     }
   end
@@ -110,13 +141,20 @@ defmodule Malipo.Admin do
   A single chronological feed of money movement: STK intents and C2B till
   receipts, newest first.
 
-  `kind` is `"all"`, `"stk"`, or `"c2b"`.
+  `kind` is `"all"`, `"stk"`, or `"c2b"`. Live intents only by default.
   """
-  @spec list_transactions(non_neg_integer(), String.t()) :: [map()]
-  def list_transactions(limit \\ 100, kind \\ "all") when is_integer(limit) do
+  @spec list_transactions(non_neg_integer(), String.t(), String.t()) :: [map()]
+  def list_transactions(limit \\ 100, kind \\ "all", mode \\ "live")
+      when is_integer(limit) do
     intents =
       if kind in ["all", "stk"] do
-        Repo.all(from(i in Intent, order_by: [desc: i.inserted_at], limit: ^limit))
+        Repo.all(
+          from(i in Intent,
+            where: i.mode == ^mode,
+            order_by: [desc: i.inserted_at],
+            limit: ^limit
+          )
+        )
         |> Enum.map(&transaction_from_intent/1)
       else
         []
@@ -348,7 +386,7 @@ defmodule Malipo.Admin do
 
   defp keys_by_business(business_ids) do
     from(k in ApiKey,
-      where: k.business_id in ^business_ids and is_nil(k.revoked_at),
+      where: k.business_id in ^business_ids and is_nil(k.revoked_at) and k.mode == "live",
       order_by: [desc: k.inserted_at]
     )
     |> Repo.all()
@@ -360,7 +398,7 @@ defmodule Malipo.Admin do
   defp intent_rollups(business_ids) do
     counts =
       from(i in Intent,
-        where: i.business_id in ^business_ids,
+        where: i.business_id in ^business_ids and i.mode == "live",
         group_by: i.business_id,
         select: {i.business_id, count(i.id)}
       )
@@ -369,7 +407,7 @@ defmodule Malipo.Admin do
 
     settled =
       from(i in Intent,
-        where: i.business_id in ^business_ids and i.status == "settled",
+        where: i.business_id in ^business_ids and i.status == "settled" and i.mode == "live",
         group_by: i.business_id,
         select: {i.business_id, count(i.id), sum(i.amount)}
       )

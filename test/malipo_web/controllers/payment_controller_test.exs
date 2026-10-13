@@ -153,4 +153,117 @@ defmodule MalipoWeb.PaymentControllerTest do
     |> post(~p"/v1/payments", %{"amount" => "1.00"})
     |> json_response(401)
   end
+
+  test "a test key creates a sandbox payment, never a live one (sandbox rule 1)", %{conn: conn} do
+    {:ok, test_keys} = Merchants.provision_keys("biz_pay_test", "test")
+
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer #{test_keys.client_secret}")
+      |> post(~p"/v1/payments", %{
+        "amount" => "1.00",
+        "customer_phone" => "0712345678",
+        "idempotency_key" => "test-key-sandbox"
+      })
+      |> json_response(201)
+
+    intent = Malipo.Intents.get(body["id"])
+    assert intent.mode == "test"
+    assert String.starts_with?(intent.checkout_request_id, "ws_CO_test_")
+  end
+
+  describe "sandbox (test mode)" do
+    defp test_key do
+      {:ok, keys} = Merchants.provision_keys("biz_pay", "test")
+      keys
+    end
+
+    defp bearer(conn, secret), do: put_req_header(conn, "authorization", "Bearer #{secret}")
+
+    test "a test key creates a simulated settled payment (reserved number)", %{conn: conn} do
+      keys = test_key()
+
+      body =
+        conn
+        |> bearer(keys.client_secret)
+        |> post(~p"/v1/payments", %{
+          "amount" => "1.00",
+          "customer_phone" => "254000000001",
+          "reference" => "SBX-OK",
+          "idempotency_key" => "sbx-ok-ctrl"
+        })
+        |> json_response(201)
+
+      assert body["status"] == "settled"
+      assert String.starts_with?(body["receipt"], "TEST")
+      assert body["reference"] == "SBX-OK"
+    end
+
+    test "a test key can force a failure with simulate", %{conn: conn} do
+      keys = test_key()
+
+      created =
+        conn
+        |> bearer(keys.client_secret)
+        |> post(~p"/v1/payments", %{
+          "amount" => "5.00",
+          "customer_phone" => "254712345678",
+          "idempotency_key" => "sbx-sim-ctrl"
+        })
+        |> json_response(201)
+
+      assert created["status"] == "pending"
+
+      sim =
+        conn
+        |> bearer(keys.client_secret)
+        |> post(~p"/v1/payments/#{created["id"]}/simulate", %{
+          "outcome" => "failed",
+          "failure_kind" => "wrong_pin"
+        })
+        |> json_response(200)
+
+      assert sim["status"] == "failed"
+      assert sim["failure_kind"] == "wrong_pin"
+    end
+
+    test "a test key cannot see a live payment of the same business", %{conn: conn, keys: live} do
+      live_payment =
+        conn
+        |> basic(live)
+        |> post(~p"/v1/payments", %{
+          "amount" => "1.00",
+          "customer_phone" => "0712345678",
+          "idempotency_key" => "live-only-1"
+        })
+        |> json_response(201)
+
+      test_keys = test_key()
+
+      conn
+      |> bearer(test_keys.client_secret)
+      |> get(~p"/v1/payments/#{live_payment["id"]}")
+      |> json_response(404)
+    end
+
+    test "a live key cannot call simulate", %{conn: conn, keys: live} do
+      conn
+      |> basic(live)
+      |> post(~p"/v1/payments/00000000-0000-0000-0000-000000000000/simulate", %{
+        "outcome" => "settled"
+      })
+      |> json_response(403)
+    end
+
+    test "simulate is 404 for an unknown id", %{conn: conn} do
+      keys = test_key()
+
+      conn
+      |> bearer(keys.client_secret)
+      |> post(~p"/v1/payments/00000000-0000-0000-0000-000000000000/simulate", %{
+        "outcome" => "settled"
+      })
+      |> json_response(404)
+    end
+  end
 end

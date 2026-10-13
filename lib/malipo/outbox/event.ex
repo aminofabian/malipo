@@ -14,20 +14,22 @@ defmodule Malipo.Outbox.Event do
 
   @events ~w(intent.settled intent.failed intent.expired till_receipt.unmatched rail.credentials_rejected)
   @statuses ~w(pending delivered failed)
+  @modes ~w(live test)
 
   schema "outbox" do
-    field :event_id, :string
-    field :event, :string
-    field :version, :integer, default: 1
-    field :business_id, :string
-    field :payload, :map, default: %{}
-    field :status, :string, default: "pending"
-    field :attempts, :integer, default: 0
-    field :last_error, :string
-    field :delivered_at, :utc_datetime_usec
-    field :next_attempt_at, :utc_datetime_usec
+    field(:event_id, :string)
+    field(:event, :string)
+    field(:version, :integer, default: 1)
+    field(:business_id, :string)
+    field(:mode, :string, default: "live")
+    field(:payload, :map, default: %{})
+    field(:status, :string, default: "pending")
+    field(:attempts, :integer, default: 0)
+    field(:last_error, :string)
+    field(:delivered_at, :utc_datetime_usec)
+    field(:next_attempt_at, :utc_datetime_usec)
 
-    belongs_to :intent, Intent
+    belongs_to(:intent, Intent)
 
     timestamps()
   end
@@ -36,6 +38,7 @@ defmodule Malipo.Outbox.Event do
 
   def events, do: @events
   def statuses, do: @statuses
+  def modes, do: @modes
 
   def create_changeset(attrs) do
     %__MODULE__{}
@@ -44,12 +47,14 @@ defmodule Malipo.Outbox.Event do
       :event,
       :version,
       :business_id,
+      :mode,
       :intent_id,
       :payload,
       :next_attempt_at
     ])
     |> validate_required([:event_id, :event, :business_id, :payload])
     |> validate_inclusion(:event, @events)
+    |> validate_inclusion(:mode, @modes)
     |> put_change(:status, "pending")
     |> put_change(:attempts, 0)
     |> unique_constraint(:event_id, name: :outbox_event_id)

@@ -74,7 +74,8 @@ config :malipo, Oban,
     stk_sweep: 1,
     fee_sweep: 5,
     outbox: 5,
-    webhooks: 10
+    webhooks: 10,
+    sandbox: 5
   ]
 
 # Platform Daraja — env bootstrap in runtime.exs; DB vault wins when populated

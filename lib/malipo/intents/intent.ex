@@ -23,37 +23,39 @@ defmodule Malipo.Intents.Intent do
 
   @statuses ~w(pending prompted settled failed expired)
   @terminal ~w(settled failed expired)
+  @modes ~w(live test)
 
   schema "intents" do
-    field :business_id, :string
-    field :idempotency_key, :string
-    field :rail, :string, default: "daraja"
+    field(:business_id, :string)
+    field(:idempotency_key, :string)
+    field(:rail, :string, default: "daraja")
+    field(:mode, :string, default: "live")
 
-    field :amount, :decimal
-    field :currency, :string, default: "KES"
-    field :payer_msisdn, :string
+    field(:amount, :decimal)
+    field(:currency, :string, default: "KES")
+    field(:payer_msisdn, :string)
 
-    field :status, :string, default: "pending"
-    field :context, :map, default: %{}
+    field(:status, :string, default: "pending")
+    field(:context, :map, default: %{})
 
-    field :checkout_request_id, :string
-    field :merchant_request_id, :string
-    field :receipt, :string
+    field(:checkout_request_id, :string)
+    field(:merchant_request_id, :string)
+    field(:receipt, :string)
 
-    field :fee_amount, :decimal
-    field :net_amount, :decimal
+    field(:fee_amount, :decimal)
+    field(:net_amount, :decimal)
 
-    field :failure_kind, :string
-    field :failure_message, :string
-    field :failure_provider_code, :string
+    field(:failure_kind, :string)
+    field(:failure_message, :string)
+    field(:failure_provider_code, :string)
 
-    field :expires_at, :utc_datetime_usec
-    field :prompted_at, :utc_datetime_usec
-    field :settled_at, :utc_datetime_usec
-    field :failed_at, :utc_datetime_usec
-    field :expired_at, :utc_datetime_usec
+    field(:expires_at, :utc_datetime_usec)
+    field(:prompted_at, :utc_datetime_usec)
+    field(:settled_at, :utc_datetime_usec)
+    field(:failed_at, :utc_datetime_usec)
+    field(:expired_at, :utc_datetime_usec)
 
-    has_many :attempts, Attempt
+    has_many(:attempts, Attempt)
 
     timestamps()
   end
@@ -64,7 +66,16 @@ defmodule Malipo.Intents.Intent do
   def statuses, do: @statuses
 
   @doc false
+  def modes, do: @modes
+
+  @doc false
   def terminal?(status) when is_binary(status), do: status in @terminal
+
+  def live?(%__MODULE__{mode: "live"}), do: true
+  def live?(%__MODULE__{}), do: false
+
+  def test?(%__MODULE__{mode: "test"}), do: true
+  def test?(%__MODULE__{}), do: false
 
   @doc "Changeset for creating a pending intent (idempotency reserved before push)."
   def create_changeset(attrs) do
@@ -73,6 +84,7 @@ defmodule Malipo.Intents.Intent do
       :business_id,
       :idempotency_key,
       :rail,
+      :mode,
       :amount,
       :currency,
       :payer_msisdn,
@@ -91,6 +103,7 @@ defmodule Malipo.Intents.Intent do
     |> validate_length(:currency, is: 3)
     |> validate_length(:idempotency_key, min: 8, max: 191)
     |> validate_inclusion(:rail, ["daraja"])
+    |> validate_inclusion(:mode, @modes)
     |> put_change(:status, "pending")
     |> unique_constraint([:business_id, :idempotency_key], name: :intents_idem)
   end
@@ -107,6 +120,7 @@ defmodule Malipo.Intents.Intent do
       :business_id,
       :idempotency_key,
       :rail,
+      :mode,
       :amount,
       :currency,
       :payer_msisdn,
@@ -127,6 +141,7 @@ defmodule Malipo.Intents.Intent do
     |> validate_length(:currency, is: 3)
     |> validate_length(:idempotency_key, min: 8, max: 191)
     |> validate_inclusion(:rail, ["daraja"])
+    |> validate_inclusion(:mode, @modes)
     |> then(fn cs ->
       case get_field(cs, :payer_msisdn) do
         nil -> put_change(cs, :payer_msisdn, "")
@@ -174,7 +189,14 @@ defmodule Malipo.Intents.Intent do
   def mark_settled_changeset(%__MODULE__{status: status} = intent, attrs)
       when status in ~w(prompted failed expired) do
     intent
-    |> cast(attrs, [:receipt, :settled_at, :checkout_request_id, :merchant_request_id, :fee_amount, :net_amount])
+    |> cast(attrs, [
+      :receipt,
+      :settled_at,
+      :checkout_request_id,
+      :merchant_request_id,
+      :fee_amount,
+      :net_amount
+    ])
     |> validate_required([:receipt, :settled_at])
     |> put_change(:status, "settled")
     |> put_change(:failure_kind, nil)

@@ -7,6 +7,9 @@ defmodule Malipo.Outbox.Dispatcher do
 
   Either target may be skipped. Delivery succeeds only when every *attempted*
   target succeeds. Retries for 24h via Oban + outbox backoff.
+
+  A `test` (sandbox) row skips the monolith entirely — only the merchant
+  webhook is delivered, signed with that mode's webhook secret.
   """
 
   use Oban.Worker, queue: :outbox, max_attempts: 40
@@ -36,10 +39,11 @@ defmodule Malipo.Outbox.Dispatcher do
 
   defp dispatch(%Event{} = row) do
     payload = row.payload |> Map.put("event_id", row.event_id)
+    mode = row.mode || "live"
 
     results = [
-      post_monolith(payload),
-      MerchantWebhooks.deliver(row.business_id, payload)
+      maybe_post_monolith(payload, mode),
+      MerchantWebhooks.deliver(row.business_id, payload, mode)
     ]
 
     case Enum.find(results, &match?({:error, _}, &1)) do
@@ -59,6 +63,10 @@ defmodule Malipo.Outbox.Dispatcher do
         end
     end
   end
+
+  # A sandbox event never reaches the monolith — only the merchant webhook fires.
+  defp maybe_post_monolith(_payload, "test"), do: :ok
+  defp maybe_post_monolith(payload, _live), do: post_monolith(payload)
 
   defp post_monolith(payload) do
     case Application.get_env(:malipo, :monolith_payment_events_url) ||

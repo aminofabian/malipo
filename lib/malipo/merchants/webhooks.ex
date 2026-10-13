@@ -33,16 +33,19 @@ defmodule Malipo.Merchants.Webhooks do
   Target, in order: `context.callback_url` on this payment, then the account
   webhook URL if one was saved earlier. No URL means nothing to send.
 
+  `mode` selects which key signs and supplies the account webhook URL, so a
+  sandbox payment is signed with the test secret (`whsec_test_…`).
+
   Returns `:ok` when skipped or delivered; `{:error, reason}` on HTTP failure.
   """
-  @spec deliver(String.t(), map()) :: :ok | {:error, String.t()}
-  def deliver(business_id, outbox_payload)
+  @spec deliver(String.t(), map(), String.t()) :: :ok | {:error, String.t()}
+  def deliver(business_id, outbox_payload, mode \\ "live")
       when is_binary(business_id) and is_map(outbox_payload) do
     event = public_event(outbox_payload["event"] || "")
 
     with event when is_binary(event) <- event,
          %ApiKey{webhook_secret: secret} = key
-         when is_binary(secret) and secret != "" <- Merchants.get_active_key(business_id),
+         when is_binary(secret) and secret != "" <- Merchants.get_active_key(business_id, mode),
          url when is_binary(url) and url != "" <- notify_url(key, outbox_payload) do
       body =
         Jason.encode!(%{

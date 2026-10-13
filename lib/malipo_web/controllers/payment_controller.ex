@@ -8,8 +8,9 @@ defmodule MalipoWeb.PaymentController do
   alias Malipo.Merchants
   alias Malipo.Merchants.ApiKey
   alias Malipo.Rails.Failure
+  alias Malipo.Sandbox
 
-  action_fallback MalipoWeb.FallbackController
+  action_fallback(MalipoWeb.FallbackController)
 
   @doc """
   POST /v1/payments
@@ -20,10 +21,12 @@ defmodule MalipoWeb.PaymentController do
   """
   def create(conn, params) do
     business_id = conn.assigns.business_id
+    mode = conn.assigns.mode
 
-    with {:ok, callback} <- resolve_callback(business_id, params["callback_url"]) do
-      if Merchants.collections_allowed?(business_id) do
-        attrs = public_to_intent(params, business_id, callback)
+    with {:ok, callback} <- resolve_callback(business_id, mode, params["callback_url"]) do
+      # A sandbox payment needs no settlement destination; a live one does.
+      if mode == "test" or Merchants.collections_allowed?(business_id) do
+        attrs = public_to_intent(params, business_id, mode, callback)
 
         case Intents.create_and_push(attrs) do
           {:ok, %Intent{} = intent, :replay} ->
@@ -56,9 +59,10 @@ defmodule MalipoWeb.PaymentController do
   @doc "GET /v1/payments/:id"
   def show(conn, %{"id" => id}) do
     business_id = conn.assigns.business_id
+    mode = conn.assigns.mode
 
     case Intents.get(id) do
-      %Intent{business_id: ^business_id} = intent ->
+      %Intent{business_id: ^business_id, mode: ^mode} = intent ->
         json(conn, payment_json(intent))
 
       %Intent{} ->
@@ -69,7 +73,48 @@ defmodule MalipoWeb.PaymentController do
     end
   end
 
-  defp public_to_intent(params, business_id, callback) do
+  @doc """
+  POST /v1/payments/:id/simulate — test mode only.
+
+  Forces a terminal state on a sandbox payment, deterministically:
+  `{"outcome":"settled"}` or `{"outcome":"failed","failure_kind":"wrong_pin"}`.
+  """
+  def simulate(conn, %{"id" => id} = params) do
+    business_id = conn.assigns.business_id
+
+    with %Intent{business_id: ^business_id, mode: "test"} = intent <- Intents.get(id),
+         {:ok, outcome} <- parse_outcome(params["outcome"]),
+         {:ok, updated} <- Sandbox.simulate(intent, outcome, params["failure_kind"]) do
+      json(conn, payment_json(updated))
+    else
+      %Intent{} ->
+        {:error, :not_found}
+
+      nil ->
+        {:error, :not_found}
+
+      {:error, :invalid_outcome} ->
+        unprocessable(conn, "invalid_outcome", ~s(outcome must be "settled" or "failed"))
+
+      {:error, :invalid_failure_kind} ->
+        unprocessable(conn, "invalid_failure_kind", "unknown failure_kind")
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp parse_outcome("settled"), do: {:ok, :settled}
+  defp parse_outcome("failed"), do: {:ok, :failed}
+  defp parse_outcome(_), do: {:error, :invalid_outcome}
+
+  defp unprocessable(conn, error, message) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: error, message: message})
+  end
+
+  defp public_to_intent(params, business_id, mode, callback) do
     ref = params["reference"]
 
     context =
@@ -86,6 +131,7 @@ defmodule MalipoWeb.PaymentController do
 
     %{
       "business_id" => business_id,
+      "mode" => mode,
       "amount" => params["amount"],
       "currency" => params["currency"] || "KES",
       "payer_msisdn" => params["customer_phone"] || params["payer_msisdn"],
@@ -94,16 +140,16 @@ defmodule MalipoWeb.PaymentController do
     }
   end
 
-  # A per-request callback_url wins; otherwise fall back to the merchant's saved
+  # A per-request callback_url wins; otherwise fall back to the key's saved
   # website URL (set in Connect → Settings). Not sending either means "poll".
-  defp resolve_callback(business_id, nil) do
-    case Merchants.get_active_key(business_id) do
+  defp resolve_callback(business_id, mode, nil) do
+    case Merchants.get_active_key(business_id, mode) do
       %ApiKey{webhook_url: url} when is_binary(url) -> {:ok, url}
       _ -> {:ok, nil}
     end
   end
 
-  defp resolve_callback(_business_id, url), do: take_callback(url)
+  defp resolve_callback(_business_id, _mode, url), do: take_callback(url)
 
   defp take_callback(nil), do: {:ok, nil}
 

@@ -2,145 +2,165 @@ defmodule MalipoWeb.Router do
   use MalipoWeb, :router
 
   pipeline :browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {MalipoWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {MalipoWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
   end
 
   pipeline :admin do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {MalipoWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {MalipoWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
   end
 
   pipeline :api do
-    plug :accepts, ["json"]
+    plug(:accepts, ["json"])
   end
 
   pipeline :internal do
-    plug :accepts, ["json"]
-    plug MalipoWeb.Plugs.ServiceAuth
+    plug(:accepts, ["json"])
+    plug(MalipoWeb.Plugs.ServiceAuth)
   end
 
   pipeline :merchant_api do
-    plug :accepts, ["json"]
-    plug MalipoWeb.Plugs.ApiKeyAuth
+    plug(:accepts, ["json"])
+    plug(MalipoWeb.Plugs.ApiKeyAuth, allow: ["live", "test"])
+  end
+
+  # Sandbox-only actions: a live key is refused here.
+  pipeline :merchant_api_test do
+    plug(:accepts, ["json"])
+    plug(MalipoWeb.Plugs.ApiKeyAuth, allow: ["test"])
   end
 
   pipeline :public_api do
-    plug :accepts, ["json"]
-    plug MalipoWeb.Plugs.Cors
+    plug(:accepts, ["json"])
+    plug(MalipoWeb.Plugs.Cors)
   end
 
   scope "/", MalipoWeb do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/", PageController, :home
+    get("/", PageController, :home)
   end
 
   # Deploy probes — no auth.
   scope "/", MalipoWeb do
-    get "/health", HealthController, :live
-    get "/ready", HealthController, :ready
+    get("/health", HealthController, :live)
+    get("/ready", HealthController, :ready)
   end
 
   scope "/admin", MalipoWeb do
-    pipe_through :admin
+    pipe_through(:admin)
 
     # Sign-in is a plain HTTP round trip so the session cookie can be written.
     live_session :admin_guest,
       on_mount: {MalipoWeb.AdminAuth, :redirect_if_authenticated} do
-      live "/login", Admin.LoginLive, :new
+      live("/login", Admin.LoginLive, :new)
     end
 
-    post "/login", AdminSessionController, :create
-    delete "/logout", AdminSessionController, :delete
+    post("/login", AdminSessionController, :create)
+    delete("/logout", AdminSessionController, :delete)
 
     # Everything below requires a signed-in operator.
     live_session :admin, on_mount: {MalipoWeb.AdminAuth, :require_admin} do
-      live "/", Admin.DashboardLive, :index
-      live "/transactions", Admin.TransactionsLive, :index
-      live "/intents", Admin.IntentsLive, :index
-      live "/intents/:id", Admin.IntentLive, :show
-      live "/till", Admin.TillLive, :index
-      live "/accounts", Admin.AccountsLive, :index
-      live "/outbox", Admin.OutboxLive, :index
-      live "/merchants", Admin.MerchantsLive, :index
-      live "/team", Admin.TeamLive, :index
-      live "/fees", Admin.FeesLive, :index
-      live "/daraja/platform", Admin.DarajaPlatformLive, :index
+      live("/", Admin.DashboardLive, :index)
+      live("/transactions", Admin.TransactionsLive, :index)
+      live("/intents", Admin.IntentsLive, :index)
+      live("/intents/:id", Admin.IntentLive, :show)
+      live("/till", Admin.TillLive, :index)
+      live("/accounts", Admin.AccountsLive, :index)
+      live("/outbox", Admin.OutboxLive, :index)
+      live("/merchants", Admin.MerchantsLive, :index)
+      live("/team", Admin.TeamLive, :index)
+      live("/fees", Admin.FeesLive, :index)
+      live("/daraja/platform", Admin.DarajaPlatformLive, :index)
     end
   end
 
   # Safaricom-facing callbacks — no CSRF, always 200 after persist.
   scope "/webhooks/daraja", MalipoWeb.Webhook do
-    pipe_through :api
+    pipe_through(:api)
 
-    post "/stk", DarajaController, :stk
-    post "/c2b/validation", DarajaController, :c2b_validation
-    post "/c2b/confirmation", DarajaController, :c2b_confirmation
-    post "/b2b/result", DarajaController, :b2b_result
-    post "/b2b/timeout", DarajaController, :b2b_timeout
+    post("/stk", DarajaController, :stk)
+    post("/c2b/validation", DarajaController, :c2b_validation)
+    post("/c2b/confirmation", DarajaController, :c2b_confirmation)
+    post("/b2b/result", DarajaController, :b2b_result)
+    post("/b2b/timeout", DarajaController, :b2b_timeout)
   end
 
   # Java → Malipo (§7.2) + Connect provisioning
   scope "/internal/v1", MalipoWeb do
-    pipe_through :internal
+    pipe_through(:internal)
 
-    post "/intents", IntentController, :create
-    get "/intents/:id", IntentController, :show
-    post "/intents/:id/resend", IntentController, :resend
-    post "/till-awaits", TillAwaitController, :create
+    post("/intents", IntentController, :create)
+    get("/intents/:id", IntentController, :show)
+    post("/intents/:id/resend", IntentController, :resend)
+    post("/till-awaits", TillAwaitController, :create)
 
-    post "/connect/register", ConnectAuthController, :register
-    post "/connect/login", ConnectAuthController, :login
+    post("/connect/register", ConnectAuthController, :register)
+    post("/connect/login", ConnectAuthController, :login)
 
-    get "/merchants/:business_id", MerchantController, :show
-    get "/merchants/:business_id/summary", MerchantController, :summary
-    get "/merchants/:business_id/payments", MerchantController, :payments
-    get "/merchants/:business_id/destinations", MerchantController, :list_destinations
-    post "/merchants/:business_id/destinations", MerchantController, :create_destination
+    get("/merchants/:business_id", MerchantController, :show)
+    get("/merchants/:business_id/summary", MerchantController, :summary)
+    get("/merchants/:business_id/payments", MerchantController, :payments)
+    get("/merchants/:business_id/destinations", MerchantController, :list_destinations)
+    post("/merchants/:business_id/destinations", MerchantController, :create_destination)
 
-    get "/merchants/:business_id/destinations/:destination_id",
-        MerchantController,
-        :show_destination
+    get(
+      "/merchants/:business_id/destinations/:destination_id",
+      MerchantController,
+      :show_destination
+    )
 
-    post "/merchants/:business_id/destinations/:destination_id/confirm",
-         MerchantController,
-         :confirm_destination
+    post(
+      "/merchants/:business_id/destinations/:destination_id/confirm",
+      MerchantController,
+      :confirm_destination
+    )
 
-    post "/merchants/:business_id/destinations/:destination_id/activate",
-         MerchantController,
-         :activate_destination
+    post(
+      "/merchants/:business_id/destinations/:destination_id/activate",
+      MerchantController,
+      :activate_destination
+    )
 
-    put "/merchants/:business_id/destination", MerchantController, :put_destination
-    post "/merchants/:business_id/confirm", MerchantController, :confirm
-    post "/merchants/:business_id/keys", MerchantController, :provision_keys
-    put "/merchants/:business_id/webhook", MerchantController, :put_webhook
+    put("/merchants/:business_id/destination", MerchantController, :put_destination)
+    post("/merchants/:business_id/confirm", MerchantController, :confirm)
+    post("/merchants/:business_id/keys", MerchantController, :provision_keys)
+    put("/merchants/:business_id/webhook", MerchantController, :put_webhook)
+    post("/merchants/:business_id/test-data/reset", MerchantController, :reset_test_data)
   end
 
   # Public read-only fees (marketing + clients) — CORS, no auth.
   scope "/v1", MalipoWeb do
-    pipe_through :public_api
+    pipe_through(:public_api)
 
-    get "/fees", FeeController, :show
-    options "/fees", FeeController, :preflight
-    get "/fees/quote", FeeController, :quote
-    options "/fees/quote", FeeController, :preflight
+    get("/fees", FeeController, :show)
+    options("/fees", FeeController, :preflight)
+    get("/fees/quote", FeeController, :quote)
+    options("/fees/quote", FeeController, :preflight)
   end
 
   # Public merchant API (Malipo Connect keys)
   scope "/v1", MalipoWeb do
-    pipe_through :merchant_api
+    pipe_through(:merchant_api)
 
-    post "/payments", PaymentController, :create
-    get "/payments/:id", PaymentController, :show
+    post("/payments", PaymentController, :create)
+    get("/payments/:id", PaymentController, :show)
+  end
+
+  # Sandbox control — test keys only.
+  scope "/v1", MalipoWeb do
+    pipe_through(:merchant_api_test)
+
+    post("/payments/:id/simulate", PaymentController, :simulate)
   end
 
   # Enable LiveDashboard in development
@@ -153,9 +173,9 @@ defmodule MalipoWeb.Router do
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
-      pipe_through :browser
+      pipe_through(:browser)
 
-      live_dashboard "/dashboard", metrics: MalipoWeb.Telemetry
+      live_dashboard("/dashboard", metrics: MalipoWeb.Telemetry)
     end
   end
 end

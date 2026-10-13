@@ -23,6 +23,7 @@ defmodule Malipo.Outbox do
       event_id: event_id,
       event: event,
       business_id: intent.business_id,
+      mode: intent.mode,
       intent_id: intent.id,
       payload: payload_for(intent, event, event_id),
       next_attempt_at: DateTime.utc_now()
@@ -38,6 +39,7 @@ defmodule Malipo.Outbox do
       event_id: event_id,
       event: "till_receipt.unmatched",
       business_id: receipt.business_id || "unknown",
+      mode: "live",
       intent_id: nil,
       payload: %{
         "event_id" => event_id,
@@ -98,10 +100,11 @@ defmodule Malipo.Outbox do
     |> Repo.all()
   end
 
-  @doc "Recent outbox rows newest-first (ops console)."
-  @spec list_recent(non_neg_integer()) :: [Event.t()]
-  def list_recent(limit \\ 50) do
+  @doc "Recent outbox rows newest-first (ops console), for one mode."
+  @spec list_recent(non_neg_integer(), String.t()) :: [Event.t()]
+  def list_recent(limit \\ 50, mode \\ "live") do
     from(o in Event,
+      where: o.mode == ^mode,
       order_by: [desc: o.inserted_at],
       limit: ^limit
     )

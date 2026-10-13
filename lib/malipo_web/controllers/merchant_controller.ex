@@ -10,7 +10,7 @@ defmodule MalipoWeb.MerchantController do
   alias Malipo.Merchants.Destination
   alias Malipo.Repo
 
-  action_fallback MalipoWeb.FallbackController
+  action_fallback(MalipoWeb.FallbackController)
 
   @doc "PUT /internal/v1/merchants/:business_id/destination — saves a new row."
   def put_destination(conn, %{"business_id" => business_id} = params) do
@@ -102,8 +102,10 @@ defmodule MalipoWeb.MerchantController do
   end
 
   @doc "POST /internal/v1/merchants/:business_id/keys — secrets returned once."
-  def provision_keys(conn, %{"business_id" => business_id}) do
-    case Merchants.provision_keys(business_id) do
+  def provision_keys(conn, %{"business_id" => business_id} = params) do
+    mode = normalize_mode(params["mode"])
+
+    case Merchants.provision_keys(business_id, mode) do
       {:ok, revealed} ->
         conn
         |> put_status(:created)
@@ -111,7 +113,8 @@ defmodule MalipoWeb.MerchantController do
           client_id: revealed.client_id,
           client_secret: revealed.client_secret,
           webhook_secret: revealed.webhook_secret,
-          business_id: revealed.business_id
+          business_id: revealed.business_id,
+          mode: revealed.mode
         })
 
       {:error, :destination_not_ready} ->
@@ -119,7 +122,7 @@ defmodule MalipoWeb.MerchantController do
         |> put_status(:conflict)
         |> json(%{
           error: "destination_not_ready",
-          message: "Confirm a settlement destination before issuing keys"
+          message: "Confirm a settlement destination before issuing live keys"
         })
 
       {:error, reason} ->
@@ -127,11 +130,15 @@ defmodule MalipoWeb.MerchantController do
     end
   end
 
+  defp normalize_mode("test"), do: "test"
+  defp normalize_mode(_), do: "live"
+
   @doc "PUT /internal/v1/merchants/:business_id/webhook"
   def put_webhook(conn, %{"business_id" => business_id} = params) do
     url = params["url"] || params["webhook_url"]
+    mode = normalize_mode(params["mode"])
 
-    case Merchants.set_webhook_url(business_id, url) do
+    case Merchants.set_webhook_url(business_id, url, mode) do
       {:ok, key} ->
         json(conn, %{business_id: business_id, webhook_url: key.webhook_url})
 
@@ -154,22 +161,26 @@ defmodule MalipoWeb.MerchantController do
   def show(conn, %{"business_id" => business_id}) do
     dest = Merchants.get_active_destination(business_id)
     key = Merchants.get_active_key(business_id)
+    test_key = Merchants.get_active_key(business_id, "test")
 
     json(conn, %{
       business_id: business_id,
       destination: if(dest, do: destination_json(dest), else: nil),
       destinations_count: Merchants.list_for_business(business_id) |> length(),
       client_id: key && key.client_id,
+      has_live_key: not is_nil(key),
+      test_client_id: test_key && test_key.client_id,
+      has_test_key: not is_nil(test_key),
       webhook_url: key && key.webhook_url,
       collections_allowed: Merchants.collections_allowed?(business_id)
     })
   end
 
-  @doc "GET /internal/v1/merchants/:business_id/summary — settled totals by destination."
+  @doc "GET /internal/v1/merchants/:business_id/summary — settled totals by destination (live only)."
   def summary(conn, %{"business_id" => business_id}) do
     grouped =
       from(i in Intent,
-        where: i.business_id == ^business_id and i.status == "settled",
+        where: i.business_id == ^business_id and i.status == "settled" and i.mode == "live",
         group_by: fragment("?->>'settlement_destination_id'", i.context),
         select:
           {fragment("?->>'settlement_destination_id'", i.context), count(i.id), sum(i.amount)}
@@ -178,7 +189,7 @@ defmodule MalipoWeb.MerchantController do
 
     totals =
       from(i in Intent,
-        where: i.business_id == ^business_id and i.status == "settled",
+        where: i.business_id == ^business_id and i.status == "settled" and i.mode == "live",
         select: %{count: count(i.id), total: sum(i.amount)}
       )
       |> Repo.one()
@@ -194,7 +205,7 @@ defmodule MalipoWeb.MerchantController do
     })
   end
 
-  @doc "GET /internal/v1/merchants/:business_id/payments — last few intents."
+  @doc "GET /internal/v1/merchants/:business_id/payments — last few intents, by mode."
   def payments(conn, %{"business_id" => business_id} = params) do
     limit =
       case Integer.parse(to_string(params["limit"] || "5")) do
@@ -202,12 +213,20 @@ defmodule MalipoWeb.MerchantController do
         _ -> 5
       end
 
+    mode = normalize_mode(params["mode"])
+
     rows =
       business_id
-      |> Malipo.Intents.list_for_business(limit)
+      |> Malipo.Intents.list_for_business(limit, mode)
       |> Enum.map(&payment_summary/1)
 
-    json(conn, %{business_id: business_id, payments: rows})
+    json(conn, %{business_id: business_id, mode: mode, payments: rows})
+  end
+
+  @doc "POST /internal/v1/merchants/:business_id/test-data/reset — D7."
+  def reset_test_data(conn, %{"business_id" => business_id}) do
+    {:ok, counts} = Malipo.Intents.reset_test_data(business_id)
+    json(conn, Map.merge(%{business_id: business_id}, counts))
   end
 
   defp decimal_str(nil), do: "0"
