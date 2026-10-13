@@ -164,6 +164,7 @@ defmodule Malipo.Merchants do
 
     secret_attrs = %{
       client_secret_hash: hash(client_secret),
+      client_secret: client_secret,
       webhook_secret_hash: hash(webhook_secret),
       webhook_secret: webhook_secret
     }
@@ -266,6 +267,28 @@ defmodule Malipo.Merchants do
       limit: 1
     )
     |> Repo.one()
+  end
+
+  @doc """
+  Decrypt and return the key's secrets for a reveal request.
+
+  `{:error, :not_revealable}` means the row predates encrypted client-secret
+  storage — rotate once to enable revealing it.
+  """
+  @spec reveal_keys(String.t(), String.t()) ::
+          {:ok, map()} | {:error, :no_active_key | :not_revealable}
+  def reveal_keys(business_id, mode \\ "live") do
+    case get_active_key(business_id, mode) do
+      %ApiKey{client_secret: secret, webhook_secret: webhook, client_id: id, mode: m}
+      when is_binary(secret) and secret != "" ->
+        {:ok, %{client_id: id, client_secret: secret, webhook_secret: webhook, mode: m}}
+
+      %ApiKey{} ->
+        {:error, :not_revealable}
+
+      nil ->
+        {:error, :no_active_key}
+    end
   end
 
   @doc "Recent destinations newest-first (ops console)."

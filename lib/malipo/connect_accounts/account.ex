@@ -11,16 +11,27 @@ defmodule Malipo.ConnectAccounts.Account do
   @timestamps_opts [type: :utc_datetime_usec]
 
   schema "connect_accounts" do
-    field :email, :string
-    field :password, :string, virtual: true, redact: true
-    field :password_hash, :string, redact: true
-    field :business_id, :string
-    field :display_name, :string
+    field(:email, :string)
+    field(:password, :string, virtual: true, redact: true)
+    field(:password_hash, :string, redact: true)
+    field(:business_id, :string)
+    field(:display_name, :string)
+
+    # Reveal-a-key rate limit / lockout + last-reveal audit timestamp.
+    field(:reveal_attempts, :integer, default: 0)
+    field(:reveal_locked_until, :utc_datetime_usec)
+    field(:last_key_reveal_at, :utc_datetime_usec)
 
     timestamps()
   end
 
   @type t :: %__MODULE__{}
+
+  @doc "Bookkeeping for key reveals (attempts, lockout, last reveal)."
+  def reveal_changeset(%__MODULE__{} = account, attrs) do
+    account
+    |> cast(attrs, [:reveal_attempts, :reveal_locked_until, :last_key_reveal_at])
+  end
 
   def registration_changeset(attrs) do
     %__MODULE__{}

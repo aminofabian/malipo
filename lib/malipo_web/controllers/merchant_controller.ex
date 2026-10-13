@@ -4,6 +4,7 @@ defmodule MalipoWeb.MerchantController do
   use MalipoWeb, :controller
 
   import Ecto.Query
+  require Logger
 
   alias Malipo.Intents.Intent
   alias Malipo.Merchants
@@ -132,6 +133,66 @@ defmodule MalipoWeb.MerchantController do
 
   defp normalize_mode("test"), do: "test"
   defp normalize_mode(_), do: "live"
+
+  @doc """
+  POST /internal/v1/merchants/:business_id/keys/reveal — password-gated.
+
+  The merchant re-enters their account password; on success the active key's
+  `client_secret` and `webhook_secret` are returned once, with `no-store`.
+  """
+  def reveal_keys(conn, %{"business_id" => business_id} = params) do
+    password = to_string(params["password"] || "")
+    mode = normalize_mode(params["mode"])
+
+    if password == "" do
+      conn
+      |> put_status(:bad_request)
+      |> json(%{error: "password_required", message: "Enter your account password"})
+    else
+      case Malipo.ConnectAccounts.authorize_reveal(business_id, password) do
+        :ok ->
+          do_reveal(conn, business_id, mode, params["ip"])
+
+        {:error, :invalid_credentials} ->
+          conn
+          |> put_status(:unauthorized)
+          |> json(%{error: "invalid_password", message: "That password is not correct"})
+
+        {:error, :locked} ->
+          conn
+          |> put_status(:too_many_requests)
+          |> put_resp_header("retry-after", "900")
+          |> json(%{
+            error: "locked",
+            message: "Too many attempts. Try again in a few minutes."
+          })
+      end
+    end
+  end
+
+  defp do_reveal(conn, business_id, mode, ip) do
+    case Merchants.reveal_keys(business_id, mode) do
+      {:ok, revealed} ->
+        Logger.info("keys revealed business=#{business_id} mode=#{mode} ip=#{ip || "unknown"}")
+
+        conn
+        |> put_resp_header("cache-control", "no-store")
+        |> json(revealed)
+
+      {:error, :no_active_key} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: "no_key", message: "Issue keys first"})
+
+      {:error, :not_revealable} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: "rotate_required",
+          message: "Rotate this key once to enable revealing it"
+        })
+    end
+  end
 
   @doc "PUT /internal/v1/merchants/:business_id/webhook"
   def put_webhook(conn, %{"business_id" => business_id} = params) do

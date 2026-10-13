@@ -134,6 +134,7 @@ defmodule MalipoWeb.Router do
     put("/merchants/:business_id/destination", MerchantController, :put_destination)
     post("/merchants/:business_id/confirm", MerchantController, :confirm)
     post("/merchants/:business_id/keys", MerchantController, :provision_keys)
+    post("/merchants/:business_id/keys/reveal", MerchantController, :reveal_keys)
     put("/merchants/:business_id/webhook", MerchantController, :put_webhook)
     post("/merchants/:business_id/test-data/reset", MerchantController, :reset_test_data)
   end

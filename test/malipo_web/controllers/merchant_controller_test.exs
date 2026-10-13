@@ -158,4 +158,54 @@ defmodule MalipoWeb.MerchantControllerTest do
 
     assert length(live_after["payments"]) == 1
   end
+
+  test "reveal returns secrets only with the account password", %{conn: conn} do
+    {:ok, _} =
+      Malipo.ConnectAccounts.register(%{
+        "email" => "rev@example.com",
+        "password" => "secret123",
+        "business_id" => "biz_rev_api"
+      })
+
+    put(conn, ~p"/internal/v1/merchants/biz_rev_api/destination", %{
+      "kind" => "till",
+      "till_number" => "1234567"
+    })
+    |> json_response(201)
+
+    post(conn, ~p"/internal/v1/merchants/biz_rev_api/confirm", %{}) |> json_response(200)
+
+    keys = post(conn, ~p"/internal/v1/merchants/biz_rev_api/keys", %{}) |> json_response(201)
+
+    # Wrong password is refused.
+    post(conn, ~p"/internal/v1/merchants/biz_rev_api/keys/reveal", %{"password" => "nope"})
+    |> json_response(401)
+
+    # Right password returns the secrets.
+    revealed =
+      post(conn, ~p"/internal/v1/merchants/biz_rev_api/keys/reveal", %{"password" => "secret123"})
+      |> json_response(200)
+
+    assert revealed["client_id"] == keys["client_id"]
+    assert revealed["client_secret"] == keys["client_secret"]
+    assert revealed["webhook_secret"] == keys["webhook_secret"]
+  end
+
+  test "reveal locks out after repeated wrong passwords", %{conn: conn} do
+    {:ok, _} =
+      Malipo.ConnectAccounts.register(%{
+        "email" => "lock@example.com",
+        "password" => "secret123",
+        "business_id" => "biz_lock_api"
+      })
+
+    Enum.each(1..5, fn _ ->
+      post(conn, ~p"/internal/v1/merchants/biz_lock_api/keys/reveal", %{"password" => "wrong"})
+      |> json_response(401)
+    end)
+
+    # Even the correct password is refused while locked out.
+    post(conn, ~p"/internal/v1/merchants/biz_lock_api/keys/reveal", %{"password" => "secret123"})
+    |> json_response(429)
+  end
 end

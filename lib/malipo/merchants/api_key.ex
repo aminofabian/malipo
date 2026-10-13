@@ -2,8 +2,9 @@ defmodule Malipo.Merchants.ApiKey do
   @moduledoc """
   Merchant API credentials.
 
-  - `client_secret` — hashed only (never recoverable)
-  - `webhook_secret` — Cloak-encrypted so we can HMAC outbound webhooks; shown once at provision
+  - `client_secret` — Cloak-encrypted so the merchant can reveal it again behind
+    their password; `client_secret_hash` is kept for fast authentication.
+  - `webhook_secret` — Cloak-encrypted so we can HMAC outbound webhooks (and reveal it).
   - `mode` — `"live"` (moves real money) or `"test"` (KioskPay sandbox). Stored, never inferred.
   """
 
@@ -19,6 +20,7 @@ defmodule Malipo.Merchants.ApiKey do
     field(:business_id, :string)
     field(:client_id, :string)
     field(:client_secret_hash, :binary)
+    field(:client_secret, Malipo.Encrypted.Binary)
     field(:webhook_secret_hash, :binary)
     field(:webhook_secret, Malipo.Encrypted.Binary)
     field(:webhook_url, :string)
@@ -36,6 +38,7 @@ defmodule Malipo.Merchants.ApiKey do
       :business_id,
       :client_id,
       :client_secret_hash,
+      :client_secret,
       :webhook_secret_hash,
       :webhook_secret,
       :webhook_url,

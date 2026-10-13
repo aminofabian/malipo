@@ -129,4 +129,20 @@ defmodule Malipo.MerchantsTest do
     assert Merchants.get_active_key("biz_mode", "test").client_id == rotated.client_id
     refute Merchants.get_active_key("biz_mode", "test").client_id == live_keys.client_id
   end
+
+  test "reveal_keys returns the stored secrets for the active key" do
+    assert {:ok, _} =
+             Merchants.put_destination("biz_rev", %{"kind" => "till", "till_number" => "5738421"})
+
+    assert {:ok, _} = Merchants.confirm_destination("biz_rev")
+    assert {:ok, keys} = Merchants.provision_keys("biz_rev")
+
+    assert {:ok, revealed} = Merchants.reveal_keys("biz_rev")
+    assert revealed.client_id == keys.client_id
+    assert revealed.client_secret == keys.client_secret
+    assert revealed.webhook_secret == keys.webhook_secret
+
+    # No test key issued for this business yet.
+    assert {:error, :no_active_key} = Merchants.reveal_keys("biz_rev", "test")
+  end
 end

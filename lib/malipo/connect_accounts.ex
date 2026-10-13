@@ -9,6 +9,10 @@ defmodule Malipo.ConnectAccounts do
   alias Malipo.ConnectAccounts.Password
   alias Malipo.Repo
 
+  # Key-reveal lockout: after this many wrong passwords, block for the window.
+  @reveal_max_attempts 5
+  @reveal_lock_minutes 15
+
   @doc "Register a new Connect merchant."
   @spec register(map()) :: {:ok, Account.t()} | {:error, Ecto.Changeset.t()}
   def register(attrs) when is_map(attrs) do
@@ -37,6 +41,64 @@ defmodule Malipo.ConnectAccounts do
       nil ->
         Password.no_user_verify()
         {:error, :invalid_credentials}
+    end
+  end
+
+  @doc """
+  Verify the account password for a key reveal, enforcing a lockout.
+
+  Returns `:ok` on success (resetting the counter, stamping `last_key_reveal_at`),
+  `{:error, :invalid_credentials}` on a wrong password, or `{:error, :locked}`.
+  """
+  @spec authorize_reveal(String.t(), String.t()) ::
+          :ok | {:error, :invalid_credentials | :locked}
+  def authorize_reveal(business_id, password)
+      when is_binary(business_id) and is_binary(password) do
+    case get_by_business_id(business_id) do
+      nil ->
+        Password.no_user_verify()
+        {:error, :invalid_credentials}
+
+      %Account{} = account ->
+        now = DateTime.utc_now()
+
+        cond do
+          locked?(account, now) ->
+            {:error, :locked}
+
+          Password.verify(password, account.password_hash) ->
+            account
+            |> Account.reveal_changeset(%{
+              reveal_attempts: 0,
+              reveal_locked_until: nil,
+              last_key_reveal_at: now
+            })
+            |> Repo.update()
+
+            :ok
+
+          true ->
+            account
+            |> Account.reveal_changeset(reveal_failure_attrs(account, now))
+            |> Repo.update()
+
+            {:error, :invalid_credentials}
+        end
+    end
+  end
+
+  defp locked?(%Account{reveal_locked_until: nil}, _now), do: false
+
+  defp locked?(%Account{reveal_locked_until: until}, now),
+    do: DateTime.compare(until, now) == :gt
+
+  defp reveal_failure_attrs(%Account{reveal_attempts: attempts}, now) do
+    attempts = (attempts || 0) + 1
+
+    if attempts >= @reveal_max_attempts do
+      %{reveal_attempts: 0, reveal_locked_until: DateTime.add(now, @reveal_lock_minutes, :minute)}
+    else
+      %{reveal_attempts: attempts}
     end
   end
 
