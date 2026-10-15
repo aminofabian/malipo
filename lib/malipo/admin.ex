@@ -18,6 +18,9 @@ defmodule Malipo.Admin do
   alias Malipo.Till.Receipt
 
   @dashboards_currency "KES"
+  # Africa/Nairobi is UTC+3 year-round, so the dashboard clock does not need a tz database.
+  @nairobi_offset_seconds 3 * 60 * 60
+  @default_volume_days 7
 
   @doc "Headline counts and volumes for the dashboard."
   @spec overview() :: map()
@@ -106,6 +109,56 @@ defmodule Malipo.Admin do
           )
       }
     }
+  end
+
+  @doc """
+  Shifts a UTC timestamp onto the Africa/Nairobi clock.
+
+  The result stays tagged UTC. Its calendar fields are Nairobi wall time, which
+  is what the dashboard prints and what `settled_volume_series/1` groups by.
+  """
+  @spec to_nairobi(DateTime.t()) :: DateTime.t()
+  def to_nairobi(%DateTime{} = datetime) do
+    DateTime.add(datetime, @nairobi_offset_seconds, :second)
+  end
+
+  @doc """
+  Settled live volume for each of the last `days` Nairobi calendar days,
+  oldest first. Missing days are zero.
+  """
+  @spec settled_volume_series(pos_integer()) :: [%{date: Date.t(), amount: Decimal.t()}]
+  def settled_volume_series(days \\ @default_volume_days)
+
+  def settled_volume_series(days) when is_integer(days) and days > 0 do
+    today = DateTime.utc_now() |> to_nairobi() |> DateTime.to_date()
+    start_date = Date.add(today, -(days - 1))
+    totals = volume_totals_since(nairobi_midnight_utc(start_date))
+
+    Enum.map(0..(days - 1), fn offset ->
+      date = Date.add(start_date, offset)
+      %{date: date, amount: Map.get(totals, date, zero())}
+    end)
+  end
+
+  defp nairobi_midnight_utc(%Date{} = date) do
+    date
+    |> NaiveDateTime.new!(~T[00:00:00])
+    |> DateTime.from_naive!("Etc/UTC")
+    |> DateTime.add(-@nairobi_offset_seconds, :second)
+  end
+
+  defp volume_totals_since(%DateTime{} = start_at) do
+    from(i in Intent,
+      where:
+        i.status == "settled" and i.mode == "live" and not is_nil(i.settled_at) and
+          i.settled_at >= ^start_at,
+      select: {i.settled_at, i.amount}
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn {settled_at, amount}, totals ->
+      day = settled_at |> to_nairobi() |> DateTime.to_date()
+      Map.update(totals, day, zero_if_nil(amount), &Decimal.add(&1, zero_if_nil(amount)))
+    end)
   end
 
   @doc """

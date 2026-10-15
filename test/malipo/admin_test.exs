@@ -124,6 +124,27 @@ defmodule Malipo.AdminTest do
     assert {:error, :not_found} = Admin.intent_detail(Ecto.UUID.generate())
   end
 
+  test "to_nairobi shifts the clock forward three hours" do
+    utc = ~U[2026-10-15 21:30:00Z]
+    nairobi = Admin.to_nairobi(utc)
+
+    assert nairobi.hour == 0
+    assert nairobi.day == 16
+  end
+
+  test "settled_volume_series fills seven Nairobi days and totals settled volume" do
+    settle("biz_series", "admin-series-1", "1500.00", "SERIESRCPT")
+
+    series = Admin.settled_volume_series()
+    today = DateTime.utc_now() |> Admin.to_nairobi() |> DateTime.to_date()
+
+    assert length(series) == 7
+    assert Date.diff(List.last(series).date, hd(series).date) == 6
+    assert List.last(series).date == today
+    assert Decimal.eq?(List.last(series).amount, Decimal.new("1500.00"))
+    assert Enum.all?(Enum.drop(series, -1), &Decimal.eq?(&1.amount, Decimal.new(0)))
+  end
+
   test "intent_detail resolves the attributed destination" do
     {:ok, destination} =
       Merchants.put_destination("biz_attributed", %{"kind" => "till", "till_number" => "5550000"})

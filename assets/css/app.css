@@ -103,3 +103,51 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Super-admin shell. Light values match the operations console; dark follows the theme toggle. */
+.admin-shell {
+  --admin-sidebar: 13.75rem;
+  --admin-bg: #f4f6f1;
+  --admin-card: #ffffff;
+  --admin-line: #e4e7df;
+  --admin-ink: #1c1f1a;
+  --admin-muted: #6f746a;
+  --admin-faint: #8b9086;
+  --admin-green: #146c43;
+  --admin-green-deep: #0f5a38;
+  --admin-mint: #e5f6ec;
+  --admin-bar: #0e6b3c;
+  --admin-hover: #eef1ea;
+  --admin-chip: #eef0ea;
+  --admin-danger: #c23b45;
+  --admin-danger-soft: #fdecee;
+  --admin-ok-soft: #e7f6ee;
+  --admin-stk: #3d5fd0;
+  --admin-stk-soft: #e8eefc;
+  --admin-button: #1a1c18;
+  --admin-button-text: #ffffff;
+  color: var(--admin-ink);
+  background: var(--admin-bg);
+}
+
+[data-theme="dark"] .admin-shell {
+  --admin-bg: #171a17;
+  --admin-card: #21251f;
+  --admin-line: #32382f;
+  --admin-ink: #f3f5f0;
+  --admin-muted: #a7ad9f;
+  --admin-faint: #8b9184;
+  --admin-green: #3dbe7a;
+  --admin-green-deep: #b7ebcf;
+  --admin-mint: #1c3a2a;
+  --admin-bar: #1f8a52;
+  --admin-hover: #2a3028;
+  --admin-chip: #2c332b;
+  --admin-danger: #f0a0a6;
+  --admin-danger-soft: #3a2226;
+  --admin-ok-soft: #1c3a2a;
+  --admin-stk: #9bb4ff;
+  --admin-stk-soft: #243049;
+  --admin-button: #f3f5f0;
+  --admin-button-text: #171a17;
+}

@@ -79,67 +79,77 @@ defmodule MalipoWeb.Layouts do
     doc:
       ":dashboard | :transactions | :intents | :till | :accounts | :outbox | :merchants | :team | :daraja | :fees"
 
-  attr :admin, :string, default: nil, doc: "the signed-in operator, shown in the header"
+  attr :admin, :string, default: nil, doc: "the signed-in operator, shown in the sidebar"
   slot :inner_block, required: true
 
   def admin(assigns) do
     ~H"""
-    <div class="min-h-dvh bg-base-100 text-base-content">
-      <header class="border-b border-base-300">
-        <div class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div class="flex items-baseline gap-3">
-            <a href={~p"/admin"} class="text-lg font-semibold tracking-tight">
-              Malipo
-            </a>
-            <span class="text-xs text-base-content/50">super admin</span>
-          </div>
-          <div class="flex items-center gap-3">
-            <span :if={@admin} class="hidden text-xs text-base-content/50 sm:inline">
-              {gettext("Signed in as")} <span class="font-medium text-base-content">{@admin}</span>
+    <div class="admin-shell min-h-dvh lg:grid lg:grid-cols-[var(--admin-sidebar)_minmax(0,1fr)]">
+      <aside class="flex flex-col border-b border-[var(--admin-line)] lg:sticky lg:top-0 lg:h-dvh lg:border-r lg:border-b-0">
+        <div class="flex items-center justify-between gap-3 px-4 pt-5">
+          <.link navigate={~p"/admin"} class="flex items-center gap-2.5">
+            <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--admin-green)] text-sm font-bold text-white">
+              M
             </span>
+            <span class="text-[15px] font-semibold tracking-tight">Malipo</span>
+            <span class="rounded-full bg-[var(--admin-chip)] px-2 py-1 text-center text-[9px] font-semibold uppercase leading-tight tracking-wide text-[var(--admin-muted)]">
+              Super<br />admin
+            </span>
+          </.link>
+          <.sign_out class="lg:hidden" />
+        </div>
+
+        <p :if={@admin} class="truncate px-4 pt-3 text-[11px] text-[var(--admin-muted)] lg:hidden">
+          {gettext("Signed in as")}
+          <span class="font-medium text-[var(--admin-ink)]">{@admin}</span>
+        </p>
+
+        <nav class="flex-1 space-y-6 overflow-y-auto px-3 py-6">
+          <.nav_section label="Overview">
+            <.nav_link href={~p"/admin"} current={@current == :dashboard}>Overview</.nav_link>
+          </.nav_section>
+          <.nav_section label="Money">
+            <.nav_link href={~p"/admin/transactions"} current={@current == :transactions}>
+              Transactions
+            </.nav_link>
+            <.nav_link href={~p"/admin/intents"} current={@current == :intents}>
+              Intents
+            </.nav_link>
+          </.nav_section>
+          <.nav_section label="Till">
+            <.nav_link href={~p"/admin/till"} current={@current == :till}>Receipts</.nav_link>
+            <.nav_link href={~p"/admin/outbox"} current={@current == :outbox}>Outbox</.nav_link>
+          </.nav_section>
+          <.nav_section label="Directory">
+            <.nav_link href={~p"/admin/accounts"} current={@current == :accounts}>
+              Accounts
+            </.nav_link>
+            <.nav_link href={~p"/admin/merchants"} current={@current == :merchants}>
+              Merchants
+            </.nav_link>
+          </.nav_section>
+          <div>
+            <.nav_link href={~p"/admin/team"} current={@current == :team}>Team</.nav_link>
+          </div>
+          <.nav_section label="Config">
+            <.nav_link href={~p"/admin/fees"} current={@current == :fees}>Fees</.nav_link>
+            <.nav_link href={~p"/admin/daraja/platform"} current={@current == :daraja}>
+              Daraja
+            </.nav_link>
+          </.nav_section>
+        </nav>
+
+        <div class="mt-auto hidden border-t border-[var(--admin-line)] px-4 py-4 lg:block">
+          <p :if={@admin} class="text-[11px] text-[var(--admin-muted)]">{gettext("Signed in as")}</p>
+          <p :if={@admin} class="truncate text-xs font-medium">{@admin}</p>
+          <.sign_out class="mt-3 w-full text-left" />
+          <div class="mt-4 origin-left scale-90">
             <.theme_toggle />
-            <form action={~p"/admin/logout"} method="post" class="inline">
-              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-              <input type="hidden" name="_method" value="delete" />
-              <button type="submit" class="btn btn-ghost btn-sm">{gettext("Sign out")}</button>
-            </form>
           </div>
         </div>
-        <nav class="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 pb-3 sm:px-6">
-          <.admin_nav_link href={~p"/admin"} current={@current == :dashboard}>
-            Overview
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/transactions"} current={@current == :transactions}>
-            Transactions
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/intents"} current={@current == :intents}>
-            Intents
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/till"} current={@current == :till}>
-            Till
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/accounts"} current={@current == :accounts}>
-            Accounts
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/outbox"} current={@current == :outbox}>
-            Outbox
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/merchants"} current={@current == :merchants}>
-            Merchants
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/team"} current={@current == :team}>
-            Team
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/fees"} current={@current == :fees}>
-            Fees
-          </.admin_nav_link>
-          <.admin_nav_link href={~p"/admin/daraja/platform"} current={@current == :daraja}>
-            Daraja
-          </.admin_nav_link>
-        </nav>
-      </header>
+      </aside>
 
-      <main class="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+      <main class="min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         {render_slot(@inner_block)}
       </main>
 
@@ -148,22 +158,57 @@ defmodule MalipoWeb.Layouts do
     """
   end
 
+  attr :label, :string, required: true
+  slot :inner_block, required: true
+
+  defp nav_section(assigns) do
+    ~H"""
+    <div>
+      <p class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--admin-muted)]">
+        {@label}
+      </p>
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+
   attr :href, :string, required: true
   attr :current, :boolean, default: false
   slot :inner_block, required: true
 
-  defp admin_nav_link(assigns) do
+  defp nav_link(assigns) do
     ~H"""
-    <a
-      href={@href}
+    <.link
+      navigate={@href}
+      aria-current={@current && "page"}
       class={[
-        "rounded-md px-3 py-1.5 text-sm whitespace-nowrap transition-colors",
-        @current && "bg-base-200 font-medium text-base-content",
-        !@current && "text-base-content/60 hover:bg-base-200/60 hover:text-base-content"
+        "block rounded-lg px-3 py-2 text-sm transition-colors",
+        @current && "bg-[var(--admin-mint)] font-medium text-[var(--admin-green-deep)]",
+        !@current && "text-[var(--admin-ink)] hover:bg-[var(--admin-hover)]"
       ]}
     >
       {render_slot(@inner_block)}
-    </a>
+    </.link>
+    """
+  end
+
+  attr :class, :string, default: nil
+
+  defp sign_out(assigns) do
+    ~H"""
+    <form action={~p"/admin/logout"} method="post" class="inline">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="_method" value="delete" />
+      <button
+        type="submit"
+        class={[
+          "rounded-lg border border-[var(--admin-line)] bg-[var(--admin-card)] px-3 py-1.5 text-sm text-[var(--admin-ink)] hover:bg-[var(--admin-hover)]",
+          @class
+        ]}
+      >
+        {gettext("Sign out")}
+      </button>
+    </form>
     """
   end
 
